@@ -34,10 +34,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"periph.io/x/conn/v3/physic"
@@ -132,14 +133,6 @@ const (
 	regFaultStat = 0x07
 )
 
-// config bits
-const (
-	cfgVbias      = 0x80 // VBIAS on (bit 7)
-	cfgConversion = 0x20 // single-shot conversion (bit 5)
-	cfgOneShot    = 0x20
-	cfg50HzFilter = 0x01 // example: depends on desired filter / wires
-)
-
 // parameters for conversion (change rRef to your board)
 const (
 	rRef  = 430.0   // reference resistor on board (ohms)
@@ -153,14 +146,13 @@ func readRegister(conn spi.Conn, reg byte, count int) ([]byte, error) {
 	// Many MAX31865 designs expect you to send the register address with the MSB = 1 for read.
 	// Use 0x00 + reg for write pointer, then read by clocking bytes.
 	// First set register pointer (write single byte)
-	if err := conn.Tx([]byte{reg & 0x7F}, nil); err != nil {
+	tx := make([]byte, count+1)
+	rx := make([]byte, count+1)
+	tx[0] = reg & 0x7F // bit7=0 for read
+	if err := conn.Tx(tx, rx); err != nil {
 		return nil, err
 	}
-	out := make([]byte, count)
-	if err := conn.Tx(nil, out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return rx[1:], nil
 }
 
 // writeRegister writes one byte value to a register
@@ -170,27 +162,27 @@ func writeRegister(conn spi.Conn, reg byte, val byte) error {
 }
 
 // decodeRTD converts raw RTD MSB/LSB into resistance and temperature
-func decodeRTD(msb, lsb byte) (float64, float64) {
-	combined := uint16(msb)<<8 | uint16(lsb)
-	rtdCounts := combined >> 1 // bit0 is fault
+func decodeRTD(msb, lsb byte, r0In float64) (float64, float64) {
+	if r0In < 1 {
+		r0In = r0
+	}
+	var combined uint16 = 0
+	var rtdCounts uint16 = 0
+	combined = uint16(msb)<<8 | uint16(lsb)
+	rtdCounts = combined >> 1 // bit0 is fault
 	rtdOhms := float64(rtdCounts) * rRef / 32768.0
-	temp := (rtdOhms - r0) / (r0 * alpha) // linear approx
+	temp := (rtdOhms - float64(r0In)) / (float64(r0In) * alpha) // linear approx
 	return rtdOhms, temp
 }
 
 // readRTDAndCheck reads RTD, checks fault register, returns temp or error
-func readRTDAndCheck(conn spi.Conn) (float64, float64, error) {
+func readRTDAndCheck(conn spi.Conn, r0In float64) (float64, float64, error) {
 	// Enable VBIAS and trigger single conversion
 	// Build config: VBIAS=1, One-shot conversion=1, 3-wire bit maybe set if needed
 	// For many boards you must follow the exact bit map – adjust as needed for 2/3-wire:
-	config := byte(0x80) // VBIAS on
+	config := byte(0x80 | 0x10 | 0x20 | 0x02)
 	// set appropriate filter/wire settings here if needed
 	if err := writeRegister(conn, regConfig, config); err != nil {
-		return 0, 0, err
-	}
-
-	// start conversion
-	if err := writeRegister(conn, regConfig, config|cfgOneShot); err != nil {
 		return 0, 0, err
 	}
 
@@ -202,126 +194,90 @@ func readRTDAndCheck(conn spi.Conn) (float64, float64, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-
-	// read fault status
-	f, err := readRegister(conn, regFaultStat, 1)
-	if err != nil {
-		return 0, 0, err
-	}
-	fault := f[0]
-
-	// evaluate fault bits: bit 0 = high, bit1 = low, bit2 = in-RTD short etc (check datasheet mapping)
-	// For MAX31865: faults bits include OC (open circuit), etc. If any fault bit set -> error
-	if fault != 0 {
-		return 0, 0, fmt.Errorf("MAX31865 fault register: 0x%02X", fault)
-	}
-
-	rtdOhms, temp := decodeRTD(b[0], b[1])
-
-	fmt.Printf("%02X%02X %fOhm %.1f°C\n", b[0], b[1], rtdOhms, temp)
-
-	// Additional heuristic: detect absurdly large or small resistance that indicates open-circuit
-	if rtdOhms > (rRef*2.5) || rtdOhms < 0.1 {
-		return rtdOhms, temp, errors.New("RTD reading out of range, likely open circuit")
-	}
-
+	rtdOhms, temp := decodeRTD(b[0], b[1], r0In)
+	// TODO use the register
 	return rtdOhms, temp, nil
 }
 
-/*
-// --- MAX31865 (PT100/RTD) ---
-
-	func readMAX31865(conn spi.Conn) (float64, error) {
-		// Configuration register: 0x80 = write, 0x00 = config register
-		// Continuous conversion, 60Hz filter, 3-wire disabled (bit pattern 0xC2)
-		tx := []byte{0x80, 0xC2}
-		if err := conn.Tx(tx, nil); err != nil {
-			return 0, err
-		}
-		time.Sleep(100 * time.Millisecond)
-
-		// Read 2 bytes starting at address 0x01 (MSB first)
-		tx = []byte{0x01, 0x00, 0x00}
-		rx := make([]byte, 3)
-		if err := conn.Tx(tx, rx); err != nil {
-			return 0, err
-		}
-
-		fmt.Printf("%02X%02X%02X\n", rx[0], rx[1], rx[2])
-		rt := uint16(rx[1])<<8 | uint16(rx[2])
-		// Simplified conversion: RTD to temperature (PT100, α=0.00385)
-		temp := (float64(rt)/32768.0*430.0 - 100.0) // rough estimate
-
-		return temp, nil
-	}
-*/
-func ems_egt_cht_sample_spi() {
+func ems_egt_cht_sample_spi(configFilename string) {
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
 	}
 
 	type sensor struct {
-		name    string
-		dev     string
-		kind    string
-		gpio    int
-		spiMode int
+		Name    string  `json:"name"`
+		Dev     string  `json:"dev"`
+		Kind    string  `json:"kind"`
+		Gpio    int     `json:"gpio"`
+		SpiMode int     `json:"spiMode"`
+		R0      float64 `json:"r0"`
 	}
 
-	/*
-		In this example we are using the Raspberry Pi SPI interfaces to access to the EGT-CHT
-		You can have up to 2 SPI with 2+3 CS => 5
-		If you want moure, you can use GPIO interfaces
-	*/
+	type config struct {
+		Url     string   `json:"url"`
+		Sensors []sensor `json:"sensors"`
+	}
+
+	// Load sensors.json
+	file, err := os.Open(configFilename)
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
 
 	sensors := []sensor{
-		{"egt1", "/dev/spidev0.0", "MAX31855", 0, 0},
-		{"egt2", "/dev/spidev0.1", "MAX31855", 0, 0},
-		{"cht1", "/dev/spidev1.0", "MAX31865", 0, 1},
-		{"cht2", "/dev/spidev1.1", "MAX31865", 0, 1},
-		{"cht3", "/dev/spidev1.2", "MAX31865", 0, 1},
+		{"cht1", "/dev/spidev0.0", "MAX31865", 0, 1, 0},
+		{"egt1", "/dev/spidev1.0", "MAX31855", 0, 0, 0},
 	}
+
+	data, _ := ioutil.ReadAll(file)
+	var configuration config
+	if err := json.Unmarshal(data, &configuration); err != nil {
+		panic(err)
+	}
+
+	sensors = configuration.Sensors
 
 	// infinite loop as service
 	for {
 		payload := make(map[string]float32)
 
 		for _, s := range sensors {
-			spiDev, err := spireg.Open(s.dev)
+			spiDev, err := spireg.Open(s.Dev)
 			if err != nil {
-				log.Printf("[%s] open error: %v\n", s.name, err)
+				log.Printf("[%s] open error: %v\n", s.Name, err)
 				continue
 			}
-			conn, err := spiDev.Connect(1*physic.MegaHertz, spi.Mode(s.spiMode), 8)
+			conn, err := spiDev.Connect(1*physic.MegaHertz, spi.Mode(s.SpiMode), 8)
 			if err != nil {
-				log.Printf("[%s] connect error: %v\n", s.name, err)
+				log.Printf("[%s] connect error: %v\n", s.Name, err)
 				spiDev.Close()
 				continue
 			}
 
 			var temp float64
-			switch s.kind {
+			switch s.Kind {
 			case "MAX31855":
 				temp, err = readMAX31855(conn)
 			case "MAX31865":
-				//temp, err = readMAX31865(conn)
-				_, temp, err = readRTDAndCheck(conn)
+				_, temp, err = readRTDAndCheck(conn, s.R0)
 			}
 
 			if err != nil {
-				fmt.Printf("%s error: %v\n", s.name, err)
+				fmt.Printf("%s error: %v\n", s.Name, err)
 			} else {
 				if temp < -10 {
 
 				} else {
-					fmt.Printf("%s: %.2f °C\n", s.name, temp)
-					payload[s.name] = float32(temp)
+					fmt.Printf("%s: %.2f °C\n", s.Name, temp)
+					payload[s.Name] = float32(temp)
 				}
 			}
 			spiDev.Close()
+			time.Sleep(200 * time.Millisecond)
 		}
 
-		RBEMSPostData("http://localhost/setEMS", payload)
+		RBEMSPostData(configuration.Url, payload)
 
 		time.Sleep(1 * time.Second)
 	}

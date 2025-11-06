@@ -1,0 +1,45 @@
+{
+    "url": "http://localhost/setEMS",
+    "sensors": [
+        {
+            "name": "cht1",
+            "dev": "/dev/spidev0.0",
+            "kind": "MAX31865",
+            "gpio": 0,
+            "spiMode": 1,
+            "r0": 0
+        },
+        {
+            "name": "egt1",
+            "dev": "/dev/spidev1.0",
+            "kind": "MAX31855",
+            "gpio": 0,
+            "spiMode": 0,
+            "r0": 0
+        },
+        {
+            "name": "egt2",
+            "dev": "/dev/spidev1.1",
+            "kind": "MAX31855",
+            "gpio": 0,
+            "spiMode": 0,
+            "r0": 0
+        },
+        {
+            "name": "egt3",
+            "dev": "/dev/spidev1.2",
+            "kind": "MAX31855",
+            "gpio": 0,
+            "spiMode": 0,
+            "r0": 0
+        },
+        {
+            "name": "egt4",
+            "dev": "/dev/spidev1.3",
+            "kind": "MAX31855",
+            "gpio": 0,
+            "spiMode": 0,
+            "r0": 0
+        }
+    ]
+}

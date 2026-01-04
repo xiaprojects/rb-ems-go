@@ -40,7 +40,7 @@ import (
 	"net/http"
 	"os"
 	"time"
-
+	"os/exec"
 	"periph.io/x/conn/v3/physic"
 	"periph.io/x/conn/v3/spi"
 	"periph.io/x/conn/v3/spi/spireg"
@@ -199,6 +199,17 @@ func readRTDAndCheck(conn spi.Conn, r0In float64) (float64, float64, error) {
 	return rtdOhms, temp, nil
 }
 
+
+func setGPIO(pin string, value int) error {
+        cmd := exec.Command(
+                "gpioset",
+                "-p", "100",
+                "-t", "0",
+                pin+"="+string('0'+value),
+        )
+        return cmd.Run()
+}
+
 func ems_egt_cht_sample_spi(configFilename string) {
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
@@ -255,6 +266,13 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				continue
 			}
 
+			if(s.Gpio > 0){
+				if err := setGPIO(fmt.Sprintf("GPIO%d", s.Gpio), 0); err != nil {
+                    log.Printf("Failed to set %s Enable: %v", s.Gpio, err)
+            	}
+				time.Sleep(50 * time.Millisecond)
+			}
+
 			var temp float64
 			switch s.Kind {
 			case "MAX31855":
@@ -274,7 +292,13 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				}
 			}
 			spiDev.Close()
-			time.Sleep(200 * time.Millisecond)
+			if(s.Gpio > 0){
+				if err := setGPIO(fmt.Sprintf("GPIO%d", s.Gpio), 1); err != nil {
+                    log.Printf("Failed to set %s Disable: %v", s.Gpio, err)
+            	}
+				
+			}
+			time.Sleep(50 * time.Millisecond)
 		}
 
 		RBEMSPostData(configuration.Url, payload)

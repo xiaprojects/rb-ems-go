@@ -91,6 +91,7 @@ func decodeMAX31855(raw uint32) (float64, float64, string) {
 	status := "OK"
 	if fault {
 		status = "FAULT"
+		thermoC = -100
 		if scv {
 			status += " (Short to VCC)"
 		}
@@ -121,6 +122,78 @@ func readMAX31855(conn spi.Conn) (float64, error) {
 
 	tc, _, _ := decodeMAX31855(raw)
 	return tc, nil
+}
+
+// MAX31856 TC registers (MSB addr)
+const (
+	regMAX31856TCMSB = 0x0C
+	regMAX31856CR1   = 0x01 // control register 1 - contains thermocouple type bits
+)
+
+// setMAX31856Type sets the thermocouple type bits in CR1.
+// It preserves other CR1 bits and only replaces the lower nibble (type).
+func setMAX31856Type(conn spi.Conn, t byte) error {
+	b, err := readRegister(conn, regMAX31856CR1, 1)
+	if err != nil {
+		return err
+	}
+	if len(b) < 1 {
+		return fmt.Errorf("short read CR1")
+	}
+	if(b[0] == 0x0) {
+		return fmt.Errorf("MAX31856 not responding")
+	}
+	cur := b[0]
+	if(cur != t){
+		fmt.Printf("MAX31856 set type from %X to %X\n", cur&0x0F, t&0x0F)
+		new := (cur &^ 0x0F) | (t & 0x0F) // preserve upper bits, replace lower 4 bits with type
+		return writeRegister(conn, regMAX31856CR1, new)
+	}
+	return nil
+}
+
+// readMAX31856 reads the thermocouple temperature from a MAX31856.
+// It reads 3 bytes (MSB..LSB), sign-extends the 24-bit value and applies
+// a typical MAX31856 LSB scale (0.0078125 °C per LSB).
+func readMAX31856(conn spi.Conn, thermocoupleType int) (float64, error) {
+	// set thermocouple type before reading (ignore error if nil)
+	if err := setMAX31856Type(conn, byte(thermocoupleType)); err != nil {
+		// return error if we cannot set type
+		return -100, err
+	}
+
+	b, err := readRegister(conn, regMAX31856TCMSB, 3)
+	if err != nil {
+		return -100, err
+	}
+	if len(b) < 3 {
+		return -100, fmt.Errorf("short read from MAX31856 %d bytes", len(b))
+	}
+	raw := int32(b[0])<<16 | int32(b[1])<<8 | int32(b[2])
+	if(raw == 0xffffff){
+		return -100, fmt.Errorf("MAX31856 CS not enabled %X", raw)
+	}
+	
+	if(raw == 0x0){
+		writeRegister(conn, 0x0, 0x80)
+		return -100, fmt.Errorf("MAX31856 Conversion not enabled %X", raw)
+	}
+	
+	// sign-extend 24-bit value
+	if raw&0x800000 != 0 {
+		raw |= ^int32(0xffffff)
+	}
+
+		// keep only the 19-bit signed temperature code
+	code19 := raw >> 5 // discard 5 dead bits (LTCBL[4:0]) [page:4][page:5]
+
+	// sign-extend from 19 bits (bit18 is sign)
+	if (code19 & (1 << 18)) != 0 {
+		code19 -= 1 << 19
+	}
+	// Scale: typical MAX31856 LSB ~ 2^-7 = 0.0078125 °C (adjust if needed)
+	temp := float64(code19) * 0.0078125
+	return temp, nil
 }
 
 /*******************************************************************************************/
@@ -279,10 +352,18 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				temp, err = readMAX31855(conn)
 			case "MAX31865":
 				_, temp, err = readRTDAndCheck(conn, s.R0)
+			case "MAX31856J":
+				temp, err = readMAX31856(conn, 0x02) // Type J
+			case "MAX31856K":
+				temp, err = readMAX31856(conn, 0x03) // Type K
+			case "MAX31856":
+				temp, err = readMAX31856(conn, 0x03) // Type K
+			case "MAX31856T":
+				temp, err = readMAX31856(conn, 0x07) // Type T
 			}
 
 			if err != nil {
-				fmt.Printf("%s error: %v\n", s.Name, err)
+				//fmt.Printf("%s error: %v\n", s.Name, err)
 			} else {
 				if temp < -10 {
 

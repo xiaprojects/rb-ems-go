@@ -1,0 +1,11 @@
+{
+    "url": "http://localhost/setEMS",
+    "sensors": [
+        {
+            "name": "RPM",
+            "dev": "/dev/gpiochip0",
+            "kind": "gpiopulse",
+            "gpio": 4
+        }
+    ]
+}

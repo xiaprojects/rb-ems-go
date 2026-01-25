@@ -1,0 +1,15 @@
+[Unit]
+Description=EMS
+After=network.target bluetooth.target
+
+[Service]
+ExecStart=/opt/stratux/bin/ems /opt/stratux/www/settings/ems-chtegt.json
+User=pi
+KillMode=process
+Restart=always
+RestartSec=5
+StandardOutput=null
+
+[Install]
+WantedBy=multi-user.target
+

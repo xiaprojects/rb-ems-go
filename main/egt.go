@@ -22,6 +22,7 @@
 	04 -> Display with EMS: Engine monitoring system
 	05 -> Display with Stratux BLE Traffic
 	06 -> Display with Android 6.25" 7" 8" 10" 10.2"
+	07 -> Display with Stratux BLE Traffic composed by RB-05 + RB-03 in the same box
 
 	Community edition will be free for all builders and personal use as defined by the licensing model
 	Dual licensing for commercial agreement is available
@@ -39,8 +40,11 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sync"
 	"time"
-	"os/exec"
+
+	"periph.io/x/conn/v3/gpio"
+	"periph.io/x/conn/v3/gpio/gpioreg"
 	"periph.io/x/conn/v3/physic"
 	"periph.io/x/conn/v3/spi"
 	"periph.io/x/conn/v3/spi/spireg"
@@ -58,32 +62,70 @@ func RBEMSPostData(url string, payload map[string]float32) int {
 		return 2
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-
-	}
 	return 0
 }
 
-// decodeMAX31855 decodes the 32-bit raw reading from a MAX31855
-func decodeMAX31855(raw uint32) (float64, float64, string) {
-	signMask14 := uint16(0xC000) // runtime var, not const
-	signMask12 := uint16(0xF000)
-	// Fault detection bits
-	fault := (raw & 0x00010000) != 0
-	scv := (raw & 0x4) != 0 // short to VCC
-	scg := (raw & 0x2) != 0 // short to GND
-	oc := (raw & 0x1) != 0  // open circuit
+/*************** BUS + CS MODE ****************/
 
-	// ---- Thermocouple temperature (bits 31:18)
+type SpiBus struct {
+	conn  spi.Conn
+	close func() error
+	mu    sync.Mutex
+}
+
+func (b *SpiBus) Close() {
+	if b.close != nil {
+		_ = b.close()
+	}
+}
+
+func (b *SpiBus) doKernel(fn func() error) error {
+	// Anche in kernel-CS serializzo: evita interleaving quando più sensori condividono lo stesso /dev/spidevX.Y
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return fn()
+}
+
+func (b *SpiBus) doManual(cs gpio.PinOut, fn func() error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	_ = cs.Out(gpio.High) // safety
+	if err := cs.Out(gpio.Low); err != nil {
+		return err
+	}
+	// CS deve restare LOW durante tutto il frame SPI [web:10]
+	err := fn()
+	_ = cs.Out(gpio.High)
+	return err
+}
+
+func (b *SpiBus) Do(manual bool, cs gpio.PinOut, fn func() error) error {
+	if manual {
+		return b.doManual(cs, fn)
+	}
+	return b.doKernel(fn)
+}
+
+/*************** MAX31855 ****************/
+
+func decodeMAX31855(raw uint32) (float64, float64, string) {
+	signMask14 := uint16(0xC000)
+	signMask12 := uint16(0xF000)
+
+	fault := (raw & 0x00010000) != 0
+	scv := (raw & 0x4) != 0
+	scg := (raw & 0x2) != 0
+	oc := (raw & 0x1) != 0
+
 	tc := int16(raw >> 18)
-	if tc&0x2000 != 0 { // sign bit (bit 13)
-		tc |= int16(signMask14) // sign-extend negative values
+	if tc&0x2000 != 0 {
+		tc |= int16(signMask14)
 	}
 	thermoC := float64(tc) * 0.25
 
-	// ---- Internal temperature (bits 17:4)
 	internal := int16((raw >> 4) & 0xFFF)
-	if internal&0x800 != 0 { // sign bit (bit 11)
+	if internal&0x800 != 0 {
 		internal |= int16(signMask12)
 	}
 	internalC := float64(internal) * 0.0625
@@ -102,186 +144,150 @@ func decodeMAX31855(raw uint32) (float64, float64, string) {
 			status += " (Open Circuit)"
 		}
 	}
-
-	//fmt.Printf("%X %s\n", raw, status)
-
 	return thermoC, internalC, status
 }
 
-// --- MAX31855 ---
-func readMAX31855(conn spi.Conn) (float64, error) {
-	buf := make([]byte, 4)
-	if err := conn.Tx(nil, buf); err != nil {
+func readMAX31855(b *SpiBus, manual bool, cs gpio.PinOut) (float64, error) {
+	var buf [4]byte
+	err := b.Do(manual, cs, func() error {
+		return b.conn.Tx(nil, buf[:])
+	})
+	if err != nil {
 		return 0, err
 	}
-	raw := binary.BigEndian.Uint32(buf)
 
+	raw := binary.BigEndian.Uint32(buf[:])
 	if raw == 0 {
 		return -100, nil
 	}
-
 	tc, _, _ := decodeMAX31855(raw)
 	return tc, nil
 }
 
-// MAX31856 TC registers (MSB addr)
+/*************** MAX31856 ****************/
+
 const (
-	regMAX31856TCMSB = 0x0C
-	regMAX31856CR1   = 0x01 // control register 1 - contains thermocouple type bits
+	max31856CR0   = 0x00
+	max31856CR1   = 0x01
+	max31856TCMSB = 0x0C
 )
 
-// setMAX31856Type sets the thermocouple type bits in CR1.
-// It preserves other CR1 bits and only replaces the lower nibble (type).
-func setMAX31856Type(conn spi.Conn, t byte) error {
-	b, err := readRegister(conn, regMAX31856CR1, 1)
+// Framing MAX31856: bit7=0 read, bit7=1 write [web:10][web:45]
+func max31856ReadReg(b *SpiBus, manual bool, cs gpio.PinOut, reg byte, n int) ([]byte, error) {
+	w := make([]byte, 1+n)
+	r := make([]byte, 1+n)
+	w[0] = reg & 0x7F
+
+	err := b.Do(manual, cs, func() error {
+		return b.conn.Tx(w, r)
+	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if len(b) < 1 {
-		return fmt.Errorf("short read CR1")
-	}
-	if(b[0] == 0x0) {
-		return fmt.Errorf("MAX31856 not responding")
-	}
-	cur := b[0]
-	if(cur != t){
-		fmt.Printf("MAX31856 set type from %X to %X\n", cur&0x0F, t&0x0F)
-		new := (cur &^ 0x0F) | (t & 0x0F) // preserve upper bits, replace lower 4 bits with type
-		return writeRegister(conn, regMAX31856CR1, new)
-	}
-	return nil
+	return r[1:], nil
 }
 
-// readMAX31856 reads the thermocouple temperature from a MAX31856.
-// It reads 3 bytes (MSB..LSB), sign-extends the 24-bit value and applies
-// a typical MAX31856 LSB scale (0.0078125 °C per LSB).
-func readMAX31856(conn spi.Conn, thermocoupleType int) (float64, error) {
-	// set thermocouple type before reading (ignore error if nil)
-	if err := setMAX31856Type(conn, byte(thermocoupleType)); err != nil {
-		// return error if we cannot set type
+func max31856WriteReg(b *SpiBus, manual bool, cs gpio.PinOut, reg byte, data ...byte) error {
+	w := append([]byte{reg | 0x80}, data...) // write bit7=1 [web:10]
+	return b.Do(manual, cs, func() error {
+		return b.conn.Tx(w, nil)
+	})
+}
+
+func readMAX31856(b *SpiBus, manual bool, cs gpio.PinOut, thermocoupleType byte) (float64, error) {
+	// Enable continuous conversion (CR0 bit7) [web:10]
+	if err := max31856WriteReg(b, manual, cs, max31856CR0, 0x80); err != nil {
 		return -100, err
 	}
 
-	b, err := readRegister(conn, regMAX31856TCMSB, 3)
+	// Set thermocouple type in CR1 (low nibble)
+	cr1, err := max31856ReadReg(b, manual, cs, max31856CR1, 1)
 	if err != nil {
 		return -100, err
 	}
-	if len(b) < 3 {
-		return -100, fmt.Errorf("short read from MAX31856 %d bytes", len(b))
-	}
-	raw := int32(b[0])<<16 | int32(b[1])<<8 | int32(b[2])
-	if(raw == 0xffffff){
-		return -100, fmt.Errorf("MAX31856 CS not enabled %X", raw)
-	}
-	
-	if(raw == 0x0){
-		writeRegister(conn, 0x0, 0x80)
-		return -100, fmt.Errorf("MAX31856 Conversion not enabled %X", raw)
-	}
-	
-	// sign-extend 24-bit value
-	if raw&0x800000 != 0 {
-		raw |= ^int32(0xffffff)
+	newCR1 := (cr1[0] &^ 0x0F) | (thermocoupleType & 0x0F)
+	if err := max31856WriteReg(b, manual, cs, max31856CR1, newCR1); err != nil {
+		return -100, err
 	}
 
-		// keep only the 19-bit signed temperature code
-	code19 := raw >> 5 // discard 5 dead bits (LTCBL[4:0]) [page:4][page:5]
+	time.Sleep(200 * time.Millisecond)
 
-	// sign-extend from 19 bits (bit18 is sign)
+	d, err := max31856ReadReg(b, manual, cs, max31856TCMSB, 3)
+	if err != nil {
+		return -100, err
+	}
+	raw := int32(d[0])<<16 | int32(d[1])<<8 | int32(d[2])
+
+	// 19-bit signed in [23:5], LSB=2^-7=0.0078125°C [web:10]
+	code19 := raw >> 5
 	if (code19 & (1 << 18)) != 0 {
 		code19 -= 1 << 19
 	}
-	// Scale: typical MAX31856 LSB ~ 2^-7 = 0.0078125 °C (adjust if needed)
-	temp := float64(code19) * 0.0078125
-	return temp, nil
+	return float64(code19) * 0.0078125, nil
 }
 
-/*******************************************************************************************/
+/*************** MAX31865 ****************/
 
-// MAX31865 registers
 const (
-	regConfig    = 0x00
-	regRTDmsb    = 0x01
-	regRTDlsb    = 0x02
-	regFaultStat = 0x07
+	regConfig = 0x00
+	regRTDmsb = 0x01
+	regRTDlsb = 0x02
 )
 
-// parameters for conversion (change rRef to your board)
 const (
-	rRef  = 430.0   // reference resistor on board (ohms)
-	r0    = 100.0   // PT100
-	alpha = 0.00385 // PT100 alpha
+	rRef  = 430.0
+	r0    = 100.0
+	alpha = 0.00385
 )
 
-// readRegister reads count bytes from a MAX31865 over SPI.
-// It writes the register address with MSB=0 for read (per datasheet: addr with R/W = 0 for write, 1 for read is used on breakout boards — below we use addr | 0x00/0x80 depending on style).
-func readRegister(conn spi.Conn, reg byte, count int) ([]byte, error) {
-	// Many MAX31865 designs expect you to send the register address with the MSB = 1 for read.
-	// Use 0x00 + reg for write pointer, then read by clocking bytes.
-	// First set register pointer (write single byte)
+func readRegisterMAX31865(b *SpiBus, manual bool, cs gpio.PinOut, reg byte, count int) ([]byte, error) {
 	tx := make([]byte, count+1)
 	rx := make([]byte, count+1)
-	tx[0] = reg & 0x7F // bit7=0 for read
-	if err := conn.Tx(tx, rx); err != nil {
+	tx[0] = reg & 0x7F
+
+	err := b.Do(manual, cs, func() error {
+		return b.conn.Tx(tx, rx)
+	})
+	if err != nil {
 		return nil, err
 	}
 	return rx[1:], nil
 }
 
-// writeRegister writes one byte value to a register
-func writeRegister(conn spi.Conn, reg byte, val byte) error {
-	buf := []byte{reg | 0x80, val} // some breakouts use MSB set to indicate write; if yours uses other scheme remove 0x80
-	return conn.Tx(buf, nil)
+func writeRegisterMAX31865(b *SpiBus, manual bool, cs gpio.PinOut, reg byte, val byte) error {
+	buf := []byte{reg | 0x80, val}
+	return b.Do(manual, cs, func() error {
+		return b.conn.Tx(buf, nil)
+	})
 }
 
-// decodeRTD converts raw RTD MSB/LSB into resistance and temperature
 func decodeRTD(msb, lsb byte, r0In float64) (float64, float64) {
 	if r0In < 1 {
 		r0In = r0
 	}
-	var combined uint16 = 0
-	var rtdCounts uint16 = 0
-	combined = uint16(msb)<<8 | uint16(lsb)
-	rtdCounts = combined >> 1 // bit0 is fault
+	combined := uint16(msb)<<8 | uint16(lsb)
+	rtdCounts := combined >> 1
 	rtdOhms := float64(rtdCounts) * rRef / 32768.0
-	temp := (rtdOhms - float64(r0In)) / (float64(r0In) * alpha) // linear approx
+	temp := (rtdOhms - r0In) / (r0In * alpha)
 	return rtdOhms, temp
 }
 
-// readRTDAndCheck reads RTD, checks fault register, returns temp or error
-func readRTDAndCheck(conn spi.Conn, r0In float64) (float64, float64, error) {
-	// Enable VBIAS and trigger single conversion
-	// Build config: VBIAS=1, One-shot conversion=1, 3-wire bit maybe set if needed
-	// For many boards you must follow the exact bit map – adjust as needed for 2/3-wire:
+func readRTDAndCheck(b *SpiBus, manual bool, cs gpio.PinOut, r0In float64) (float64, float64, error) {
 	config := byte(0x80 | 0x10 | 0x20 | 0x02)
-	// set appropriate filter/wire settings here if needed
-	if err := writeRegister(conn, regConfig, config); err != nil {
+	if err := writeRegisterMAX31865(b, manual, cs, regConfig, config); err != nil {
 		return 0, 0, err
 	}
-
-	// wait conversion (a few ms)
 	time.Sleep(65 * time.Millisecond)
 
-	// read RTD MSB/LSB
-	b, err := readRegister(conn, regRTDmsb, 2)
+	d, err := readRegisterMAX31865(b, manual, cs, regRTDmsb, 2)
 	if err != nil {
 		return 0, 0, err
 	}
-	rtdOhms, temp := decodeRTD(b[0], b[1], r0In)
-	// TODO use the register
+	rtdOhms, temp := decodeRTD(d[0], d[1], r0In)
 	return rtdOhms, temp, nil
 }
 
-
-func setGPIO(pin string, value int) error {
-        cmd := exec.Command(
-                "gpioset",
-                "-p", "100",
-                "-t", "0",
-                pin+"="+string('0'+value),
-        )
-        return cmd.Run()
-}
+/*************** MAIN SERVICE ****************/
 
 func ems_egt_cht_sample_spi(configFilename string) {
 	if _, err := host.Init(); err != nil {
@@ -292,8 +298,8 @@ func ems_egt_cht_sample_spi(configFilename string) {
 		Name    string  `json:"name"`
 		Dev     string  `json:"dev"`
 		Kind    string  `json:"kind"`
-		Gpio    int     `json:"gpio"`
-		SpiMode int     `json:"spiMode"`
+		Gpio    int     `json:"gpio"`    // >0 => CS manuale su GPIO{n}, 0 => CS kernel [web:136]
+		SpiMode int     `json:"spiMode"` // spi.Mode(0..3)
 		R0      float64 `json:"r0"`
 	}
 
@@ -302,88 +308,101 @@ func ems_egt_cht_sample_spi(configFilename string) {
 		Sensors []sensor `json:"sensors"`
 	}
 
-	// Load sensors.json
 	file, err := os.Open(configFilename)
 	if err != nil {
 		panic(err)
 	}
 	defer file.Close()
 
-	sensors := []sensor{
-		{"cht1", "/dev/spidev0.0", "MAX31865", 0, 1, 0},
-		{"egt1", "/dev/spidev1.0", "MAX31855", 0, 0, 0},
-	}
-
 	data, _ := ioutil.ReadAll(file)
 	var configuration config
 	if err := json.Unmarshal(data, &configuration); err != nil {
 		panic(err)
 	}
+	sensors := configuration.Sensors
 
-	sensors = configuration.Sensors
+	// cache bus per /dev/spidevX.Y
+	buses := map[string]*SpiBus{}
 
-	// infinite loop as service
+	getBus := func(dev string, mode spi.Mode) (*SpiBus, error) {
+		if b, ok := buses[dev]; ok {
+			return b, nil
+		}
+
+		p, err := spireg.Open(dev) // spidev node: CS kernel associato al dev [web:136]
+		if err != nil {
+			return nil, err
+		}
+
+		c, err := p.Connect(1*physic.MegaHertz, mode, 8)
+		if err != nil {
+			_ = p.Close()
+			return nil, err
+		}
+
+		b := &SpiBus{
+			conn:  c,
+			close: p.Close,
+		}
+		buses[dev] = b
+		return b, nil
+	}
+
 	for {
 		payload := make(map[string]float32)
 
 		for _, s := range sensors {
-			spiDev, err := spireg.Open(s.Dev)
+			b, err := getBus(s.Dev, spi.Mode(s.SpiMode))
 			if err != nil {
-				log.Printf("[%s] open error: %v\n", s.Name, err)
-				continue
-			}
-			conn, err := spiDev.Connect(1*physic.MegaHertz, spi.Mode(s.SpiMode), 8)
-			if err != nil {
-				log.Printf("[%s] connect error: %v\n", s.Name, err)
-				spiDev.Close()
+				log.Printf("[%s] open/connect error: %v\n", s.Name, err)
 				continue
 			}
 
-			if(s.Gpio > 0){
-				if err := setGPIO(fmt.Sprintf("GPIO%d", s.Gpio), 0); err != nil {
-                    log.Printf("Failed to set %s Enable: %v", s.Gpio, err)
-            	}
-				time.Sleep(50 * time.Millisecond)
+			manual := s.Gpio > 0
+			var cs gpio.PinOut
+			if manual {
+				cs = gpioreg.ByName(fmt.Sprintf("GPIO%d", s.Gpio))
+				if cs == nil {
+					log.Printf("[%s] GPIO%d non trovato\n", s.Name, s.Gpio)
+					continue
+				}
+				_ = cs.Out(gpio.High) // deselect
 			}
 
 			var temp float64
+
 			switch s.Kind {
 			case "MAX31855":
-				temp, err = readMAX31855(conn)
+				temp, err = readMAX31855(b, manual, cs)
+
 			case "MAX31865":
-				_, temp, err = readRTDAndCheck(conn, s.R0)
+				_, temp, err = readRTDAndCheck(b, manual, cs, s.R0)
+
 			case "MAX31856J":
-				temp, err = readMAX31856(conn, 0x02) // Type J
+				temp, err = readMAX31856(b, manual, cs, 0x02) // J
 			case "MAX31856K":
-				temp, err = readMAX31856(conn, 0x03) // Type K
+				temp, err = readMAX31856(b, manual, cs, 0x03) // K
 			case "MAX31856":
-				temp, err = readMAX31856(conn, 0x03) // Type K
+				temp, err = readMAX31856(b, manual, cs, 0x03) // default K
 			case "MAX31856T":
-				temp, err = readMAX31856(conn, 0x07) // Type T
+				temp, err = readMAX31856(b, manual, cs, 0x07) // T
+
+			default:
+				err = fmt.Errorf("kind non supportato: %s", s.Kind)
 			}
 
 			if err != nil {
-				//fmt.Printf("%s error: %v\n", s.Name, err)
-			} else {
-				if temp < -10 {
+				log.Printf("%s error: %v\n", s.Name, err)
+				continue
+			}
 
-				} else {
-					fmt.Printf("%s: %.2f °C\n", s.Name, temp)
-					payload[s.Name] = float32(temp)
-				}
+			if temp >= -10 {
+				log.Printf("%s: %.2f °C\n", s.Name, temp)
+				payload[s.Name] = float32(temp)
 			}
-			spiDev.Close()
-			if(s.Gpio > 0){
-				if err := setGPIO(fmt.Sprintf("GPIO%d", s.Gpio), 1); err != nil {
-                    log.Printf("Failed to set %s Disable: %v", s.Gpio, err)
-            	}
-				
-			}
-			time.Sleep(50 * time.Millisecond)
 		}
 
-		RBEMSPostData(configuration.Url, payload)
-
+		_ = RBEMSPostData(configuration.Url, payload)
 		time.Sleep(1 * time.Second)
 	}
 }

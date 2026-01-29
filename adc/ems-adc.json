@@ -1,0 +1,27 @@
+{
+  "url": "http://localhost/ems",
+  "sensors": [
+{
+      "name": "voltage",
+      "kind": "ADS1115",
+      "dev": "1",
+      "addr": "0x48",
+      "channel": 0,
+      "gain_mv": 6144,
+      "dr_sps": 128,
+      "r0": 1.0,
+      "probe": null
+    },
+    {
+      "name": "oiltemperature",
+      "kind": "ADS1115",
+      "dev": "1",
+      "addr": "0x48",
+      "channel": 0,
+      "gain_mv": 6144,
+      "dr_sps": 128,
+      "r0": 1.0,
+      "probe": "399S9"
+    }
+  ]
+}

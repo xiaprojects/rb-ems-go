@@ -32,108 +32,229 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"runtime"
 	"strconv"
+	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/warthog618/go-gpiocdev"
 )
 
 const (
-	ChipPath    = "/dev/gpiochip0"
-	APIURL      = "http://127.0.0.1/setEMS"
-	PPR         = 4                      // pulses per revolution
-	Window      = 250 * time.Millisecond // measurement window
-	MinDeltaRPM = 5                      // send only if changed by >= this amount
+	ChipPath = "/dev/gpiochip0"
+	APIURL   = "http://127.0.0.1/setEMS"
 )
 
 type rpmPayload struct {
 	RPM int `json:"enginerpm"`
 }
 
-func main() {
-	if len(os.Args) < 2 {
-		log.Fatal("Missing GPIO Number")
-		os.Exit(1)
-	}
-
-	i, err := strconv.Atoi(os.Args[1])
-	if err != nil {
-		log.Fatal("GPIO shall be a number")
-		os.Exit(1)
-	}
-	if i > 50 || i == 0 {
-		log.Fatal("GPIO shall be a number between 1-49")
-		os.Exit(1)
-	}
-
-	ems_rpm_sample_gpio(i)
-	os.Exit(0)
+type rpmSample struct {
+	RPM    int
+	RawRPM float64
+	Pulses uint64
+	At     time.Time
 }
 
-func ems_rpm_sample_gpio(Offset int) {
-	var pulseCount uint64
+func main() {
+	var (
+		ppr        = flag.Int("ppr", 4, "Pulses per revolution")
+		window     = flag.Duration("window", 250*time.Millisecond, "Measurement window")
+		minDelta   = flag.Int("mindelta", 5, "Send only if changed by >= this amount")
+		maxSendGap = flag.Duration("maxgap", 3*time.Second, "Force periodic send even if stable")
+		evtBuf     = flag.Int("evbuf", 1024, "GPIO event buffer size")
+		debounce   = flag.Duration("debounce", 0, "GPIO debounce (0 disables)")
+		alpha      = flag.Float64("alpha", 0.2, "EMA alpha 0..1")
+		chanBuf    = flag.Int("chanbuf", 64, "Sample channel buffer")
+	)
+	flag.Parse()
 
-	// Edge event handler: keep it short (just count), as recommended. [web:47]
+	if flag.NArg() < 1 {
+		log.Fatal("Missing GPIO Number (offset)")
+	}
+
+	offset, err := strconv.Atoi(flag.Arg(0))
+	if err != nil {
+		log.Fatal("GPIO shall be a number")
+	}
+	if offset > 50 || offset == 0 {
+		log.Fatal("GPIO shall be a number between 1-49")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := config{
+		ppr:        *ppr,
+		window:     *window,
+		minDelta:   *minDelta,
+		maxSendGap: *maxSendGap,
+		evtBuf:     *evtBuf,
+		debounce:   *debounce,
+		alpha:      *alpha,
+		chanBuf:    *chanBuf,
+	}
+
+	if err := run(ctx, offset, cfg); err != nil {
+		log.Fatal(err)
+	}
+}
+
+type config struct {
+	ppr        int
+	window     time.Duration
+	minDelta   int
+	maxSendGap time.Duration
+	evtBuf     int
+	debounce   time.Duration
+	alpha      float64
+	chanBuf    int
+}
+
+func run(ctx context.Context, offset int, cfg config) error {
+	// Keep the event handler as short as possible: only an atomic increment.
+	var pulseCount uint64
 	eh := func(evt gpiocdev.LineEvent) {
 		atomic.AddUint64(&pulseCount, 1)
 	}
 
-	line, err := gpiocdev.RequestLine(
-		ChipPath,
-		Offset,
+	opts := []gpiocdev.LineReqOption{
 		gpiocdev.WithRisingEdge,
 		gpiocdev.WithEventHandler(eh),
-		gpiocdev.WithDebounce(2*time.Millisecond),
-	)
+		gpiocdev.WithEventBufferSize(cfg.evtBuf),
+	}
+	if cfg.debounce > 0 {
+		opts = append(opts, gpiocdev.WithDebounce(cfg.debounce))
+	}
+
+	line, err := gpiocdev.RequestLine(ChipPath, offset, opts...)
 	if err != nil {
-		fmt.Printf("GPIO RequestLine failed: chip=%s offset=%d err=%v\n", ChipPath, Offset, err)
-		fmt.Println("Hints: try running with sudo, or fix /dev/gpiochip permissions; also try removing WithDebounce if unsupported.")
-		os.Exit(1)
-		return
+		return fmt.Errorf("GPIO RequestLine failed: chip=%s offset=%d err=%w", ChipPath, offset, err)
 	}
 	defer line.Close()
-	client := &http.Client{Timeout: 2 * time.Second}
 
-	lastSent := -1
-	minDutySent := 0
+	// Channel between reader and sender. Buffer helps absorb short bursts.
+	samples := make(chan rpmSample, cfg.chanBuf)
 
-	ticker := time.NewTicker(Window)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		rpmReadLoop(ctx, &pulseCount, cfg, samples)
+	}()
+	go func() {
+		defer wg.Done()
+		rpmSendLoop(ctx, cfg, samples)
+	}()
+
+	<-ctx.Done()
+	wg.Wait()
+	return nil
+}
+
+// Goroutine 1: lettura + calcolo RPM (producer)
+func rpmReadLoop(ctx context.Context, pulseCount *uint64, cfg config, out chan<- rpmSample) {
+	defer close(out)
+
+	// Let the sender have CPU priority under load.
+	runtime.Gosched()
+
+	ticker := time.NewTicker(cfg.window)
 	defer ticker.Stop()
-	alpha := 0.2 // prova 0.1..0.3
+
+	alpha := cfg.alpha
+	if alpha < 0 {
+		alpha = 0
+	}
+	if alpha > 1 {
+		alpha = 1
+	}
+
 	emaInit := false
 	var ema float64
 
-	for range ticker.C {
-		pulses := atomic.SwapUint64(&pulseCount, 0)
-		rawRPM := (float64(pulses) / Window.Seconds()) * (60.0 / float64(PPR))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case t := <-ticker.C:
+			pulses := atomic.SwapUint64(pulseCount, 0)
+			rawRPM := (float64(pulses) / cfg.window.Seconds()) * (60.0 / float64(cfg.ppr))
 
-		if !emaInit {
-			ema = rawRPM
-			emaInit = true
-		} else {
-			ema = alpha*rawRPM + (1.0-alpha)*ema
-		}
-
-		smoothRPM := int(ema + 0.5) // arrotonda
-
-		if minDutySent > 10 || abs(smoothRPM-lastSent) >= MinDeltaRPM {
-			fmt.Println("RPM:", smoothRPM)
-			if err := postRPM(client, smoothRPM); err != nil {
-				fmt.Println("POST error:", err)
+			if !emaInit {
+				ema = rawRPM
+				emaInit = true
 			} else {
-				lastSent = smoothRPM
+				ema = alpha*rawRPM + (1.0-alpha)*ema
 			}
-			minDutySent = 0
-		}
-		minDutySent = minDutySent + 1
-	}
 
+			smooth := int(ema + 0.5)
+			s := rpmSample{RPM: smooth, RawRPM: rawRPM, Pulses: pulses, At: t}
+
+			select {
+			case out <- s:
+			case <-ctx.Done():
+				return
+			default:
+				// If sender is slow, drop the oldest sample behaviour is preferable.
+				// Here we drop the new sample to keep reader lightweight.
+			}
+		}
+	}
+}
+
+// Goroutine 2: invio HTTP (consumer)
+func rpmSendLoop(ctx context.Context, cfg config, in <-chan rpmSample) {
+	// Encourage the sender to run promptly.
+	runtime.GOMAXPROCS(runtime.GOMAXPROCS(0))
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	lastSent := -1
+	lastSentAt := time.Time{}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case s, ok := <-in:
+			if !ok {
+				return
+			}
+
+			needSend := false
+			if lastSent < 0 {
+				needSend = true
+			} else if abs(s.RPM-lastSent) >= cfg.minDelta {
+				needSend = true
+			} else if !lastSentAt.IsZero() && time.Since(lastSentAt) >= cfg.maxSendGap {
+				needSend = true
+			}
+
+			if !needSend {
+				continue
+			}
+
+			fmt.Printf("RPM: %d (raw=%.1f pulses=%d)\n", s.RPM, s.RawRPM, s.Pulses)
+			if err := postRPM(client, s.RPM); err != nil {
+				fmt.Println("POST error:", err)
+				continue
+			}
+
+			lastSent = s.RPM
+			lastSentAt = time.Now()
+		}
+	}
 }
 
 func postRPM(client *http.Client, rpm int) error {
@@ -141,12 +262,13 @@ func postRPM(client *http.Client, rpm int) error {
 	if err != nil {
 		return err
 	}
+
 	req, err := http.NewRequest(http.MethodPost, APIURL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
 
+	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
 		return err

@@ -36,7 +36,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
+
 	"net/http"
 	"os"
 	"strconv"
@@ -210,44 +210,6 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 	return v, nil
 }
 
-// LUT basata su valori Westach 399-series pubblicati (°F vs ohm).
-var westach399_R_ohm_vs_F = []struct {
-	F float64
-	R float64
-}{
-	{32, 9800},
-	{70, 3570},
-	{100, 1750},
-	{212, 212},
-}
-
-func westach399S9_F_from_R(R float64) (float64, error) {
-	if R <= 0 {
-		return 0, fmt.Errorf("invalid resistance %.3f", R)
-	}
-
-	if R >= westach399_R_ohm_vs_F[0].R {
-		return westach399_R_ohm_vs_F[0].F, nil
-	}
-	last := westach399_R_ohm_vs_F[len(westach399_R_ohm_vs_F)-1]
-	if R <= last.R {
-		return last.F, nil
-	}
-
-	for i := 0; i < len(westach399_R_ohm_vs_F)-1; i++ {
-		a := westach399_R_ohm_vs_F[i]
-		b := westach399_R_ohm_vs_F[i+1]
-		if R <= a.R && R >= b.R {
-			la := math.Log(a.R)
-			lb := math.Log(b.R)
-			lr := math.Log(R)
-			t := (lr - la) / (lb - la)
-			return a.F + t*(b.F-a.F), nil
-		}
-	}
-	return 0, fmt.Errorf("resistance out of lut range: %.3f", R)
-}
-
 func ems_adc_sample_i2c(configFilename string) {
 	type sensor struct {
 		Name    string  `json:"name"`
@@ -258,7 +220,7 @@ func ems_adc_sample_i2c(configFilename string) {
 		R0      float64 `json:"r0"`
 		GainmV  int     `json:"gain_mv"`
 		DRSPS   int     `json:"dr_sps"`
-		Probe   *string `json:"probe"` // null oppure "399S9"
+		R0Offset float64 `json:"r0Offset"`
 	}
 	type config struct {
 		Url     string   `json:"url"`
@@ -371,13 +333,7 @@ func ems_adc_sample_i2c(configFilename string) {
 				continue
 			}
 
-			out := v * s.R0
-			if s.Probe != nil && *s.Probe == "399S9" {
-				// Qui nel tuo codice originale sembra ci fosse una conversione V->R e poi R->F.
-				// Mantengo la firma, ma se vuoi la conversione completa dimmi come calcoli R da V.
-				out, _ = westach399S9_F_from_R(out)
-			}
-
+			out := v * s.R0 + s.R0Offset
 			log.Printf("%s: Vin=%.6fV value=%.6f", s.Name, v, out)
 			payload[s.Name] = float32(out)
 		}

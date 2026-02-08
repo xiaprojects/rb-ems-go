@@ -1,5 +1,5 @@
 {
-  "url": "http://localhost/ems",
+  "url": "http://localhost/setEMS",
   "sensors": [
 {
       "name": "voltage",
@@ -7,10 +7,10 @@
       "dev": "1",
       "addr": "0x48",
       "channel": 0,
-      "gain_mv": 6144,
+      "gain_mv": 512,
       "dr_sps": 128,
       "r0": 1.0,
-      "probe": null
+      "r0Offset": 0.0
     },
     {
       "name": "oiltemperature",
@@ -18,10 +18,10 @@
       "dev": "1",
       "addr": "0x48",
       "channel": 0,
-      "gain_mv": 6144,
+      "gain_mv": 512,
       "dr_sps": 128,
-      "r0": 1.0,
-      "probe": "399S9"
+      "r0": -340,
+      "r0Offset": 182
     }
   ]
 }

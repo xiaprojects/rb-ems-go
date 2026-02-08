@@ -7,7 +7,8 @@
             "kind": "MAX31856K",
             "gpio": 17,
             "spiMode": 1,
-            "r0": 0
+            "r0": 0,
+            "r0Offset": 0
         },
         {
             "name": "cht1",
@@ -15,7 +16,8 @@
             "kind": "MAX31856K",
             "gpio": 5,
             "spiMode": 1,
-            "r0": 0
+            "r0": 0,
+            "r0Offset": 0
         },
         {
             "name": "cht2",
@@ -23,7 +25,8 @@
             "kind": "MAX31856K",
             "gpio": 26,
             "spiMode": 1,
-            "r0": 0
+            "r0": 0,
+            "r0Offset": 0
         },
         {
             "name": "cht3",
@@ -31,7 +34,8 @@
             "kind": "MAX31856K",
             "gpio": 6,
             "spiMode": 1,
-            "r0": 0
+            "r0": 0,
+            "r0Offset": 0
         },
         {
             "name": "cht4",
@@ -39,7 +43,8 @@
             "kind": "MAX31856K",
             "gpio": 27,
             "spiMode": 1,
-            "r0": 0
+            "r0": 0,
+            "r0Offset": 0
         },
         {
             "name": "egt1",
@@ -47,14 +52,16 @@
             "kind": "MAX31855",
             "gpio": 7,
             "spiMode": 0,
-            "r0": 0
+            "r0": 0.9,
+            "r0Offset": 22.0
         },        {
             "name": "egt2",
             "dev": "/dev/spidev0.0",
             "kind": "MAX31855",
             "gpio": 24,
             "spiMode": 0,
-            "r0": 0
+            "r0": 0.9,
+            "r0Offset": 22.0
         },
         {
             "name": "egt3",
@@ -62,7 +69,8 @@
             "kind": "MAX31855",
             "gpio": 8,
             "spiMode": 0,
-            "r0": 0
+            "r0": 0.9,
+            "r0Offset": 22.0
         },
         {
             "name": "egt4",
@@ -70,7 +78,8 @@
             "kind": "MAX31855",
             "gpio": 23,
             "spiMode": 0,
-            "r0": 0
+            "r0": 0.9,
+            "r0Offset": 22.0
         }
     ]
 }

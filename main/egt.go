@@ -301,6 +301,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 		Gpio    int     `json:"gpio"`    // >0 => CS manuale su GPIO{n}, 0 => CS kernel [web:136]
 		SpiMode int     `json:"spiMode"` // spi.Mode(0..3)
 		R0      float64 `json:"r0"`
+		R0Offset float64 `json:"r0Offset"`
 	}
 
 	type config struct {
@@ -376,7 +377,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				temp, err = readMAX31855(b, manual, cs)
 
 			case "MAX31865":
-				_, temp, err = readRTDAndCheck(b, manual, cs, s.R0)
+				_, temp, err = readRTDAndCheck(b, manual, cs, 100)
 
 			case "MAX31856J":
 				temp, err = readMAX31856(b, manual, cs, 0x02) // J
@@ -395,6 +396,8 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				log.Printf("%s error: %v\n", s.Name, err)
 				continue
 			}
+
+			temp = temp * s.R0 + s.R0Offset
 
 			if temp >= -10 {
 				log.Printf("%s: %.2f °C\n", s.Name, temp)

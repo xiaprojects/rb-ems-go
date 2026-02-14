@@ -1,0 +1,4 @@
+github.com/warthog618/go-gpiocdev v0.9.1 h1:pwHPaqjJfhCipIQl78V+O3l9OKHivdRDdmgXYbmhuCI=
+github.com/warthog618/go-gpiocdev v0.9.1/go.mod h1:dN3e3t/S2aSNC+hgigGE/dBW8jE1ONk9bDSEYfoPyl8=
+golang.org/x/sys v0.18.0 h1:DBdB3niSjOA/O0blCZBqDefyWNYveAYMNF1Wum0DYQ4=
+golang.org/x/sys v0.18.0/go.mod h1:/VUhepiaJMQUp4+oa/7Zr1D23ma6VTLIYjOOTFZPUcA=

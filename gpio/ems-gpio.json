@@ -1,0 +1,23 @@
+{
+  "url": "http://localhost/setEMS",
+  "sensors": [
+    {
+      "name": "gearnose",
+      "kind": "GPIO",
+      "dev": "1",
+      "channel": 22
+    },
+    {
+      "name": "gearleft",
+      "kind": "GPIO",
+      "dev": "1",
+      "channel": 13
+    },
+    {
+      "name": "gearright",
+      "kind": "GPIO",
+      "dev": "1",
+      "channel": 25
+    }
+  ]
+}

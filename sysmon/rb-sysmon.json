@@ -1,0 +1,312 @@
+{
+  "url": "http://localhost/setEMS",
+  "sensors": [
+        {
+      "name": "wlan0_connected",
+      "dev": "ip link show wlan0 | grep 'state UP' && echo 1 || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "ap0_connected", 
+      "dev": "ip link show ap0 | grep 'state UP' >/dev/null && echo 1 || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "bnep0_connected",
+      "dev": "ip link show bnep0 | grep 'state UP' >/dev/null && echo 1 || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "eth0_connected",
+      "dev": "ip link show eth0 | grep 'state UP' >/dev/null && echo 1 || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "wlan0_rx_bytes",
+      "dev": "cat /sys/class/net/wlan0/statistics/rx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "wlan0_tx_bytes",
+      "dev": "cat /sys/class/net/wlan0/statistics/tx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "ap0_rx_bytes",
+      "dev": "cat /sys/class/net/ap0/statistics/rx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "ap0_tx_bytes",
+      "dev": "cat /sys/class/net/ap0/statistics/tx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "bnep0_rx_bytes",
+      "dev": "cat /sys/class/net/bnep0/statistics/rx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "bnep0_tx_bytes",
+      "dev": "cat /sys/class/net/bnep0/statistics/tx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "eth0_rx_bytes",
+      "dev": "cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "eth0_tx_bytes",
+      "dev": "cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "cpu_fan",
+      "dev": "cat /sys/class/thermal/cooling_device0/cur_state || echo 0",
+      "kind": "executable",
+      "value_type": "float"
+    },    
+    {
+      "name": "cpu_temp_c",
+      "dev": "cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null | awk '{print $1/1000}' || echo 0",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "gpu_temp_c",
+      "dev": "vcgencmd measure_temp 2>/dev/null | grep -o '[0-9]*\\.[0-9]*' || echo 0",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "throttled_status",
+      "dev": "vcgencmd get_throttled | cut -d= -f2 |cut -dx -f2 || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "input_voltage_v",
+      "dev": "vcgencmd measure_volts core 2>/dev/null | grep -o '[0-9]\\.[0-9]*' || echo 0",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "input_current_ma",
+      "dev": "echo $(($(cat /sys/class/hwmon/hwmon*/in1_input 2>/dev/null || echo 0)/1000)) || echo 0",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "free_ram_kb",
+      "dev": "free | grep Mem: | awk '{print $4}'",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "swap_used_kb",
+      "dev": "free | grep Swap: | awk '{print $3}'",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "cpu_load_1m",
+      "dev": "cat /proc/loadavg |awk '{print $1}'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "cpu_load_5m",
+      "dev": "cat /proc/loadavg |awk '{print $2}'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "cpu_load_15m",
+      "dev": "cat /proc/loadavg |awk '{print $3}'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "storage_avail_gb",
+      "dev": "df / | tail -1 | awk '{print $4/1024}' | cut -d. -f1",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "uptime_seconds",
+      "dev": "cat /proc/uptime | awk '{print int($1)}'",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "pmic_3V7_WL_SW_A",
+      "dev": "vcgencmd pmic_read_adc 3V7_WL_SW_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_SYS_A",
+      "dev": "vcgencmd pmic_read_adc 3V3_SYS_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_1V8_SYS_A",
+      "dev": "vcgencmd pmic_read_adc 1V8_SYS_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_DDR_VDD2_A",
+      "dev": "vcgencmd pmic_read_adc DDR_VDD2_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_DDR_VDDQ_A",
+      "dev": "vcgencmd pmic_read_adc DDR_VDDQ_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_1V1_SYS_A",
+      "dev": "vcgencmd pmic_read_adc 1V1_SYS_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_0V8_SW_A",
+      "dev": "vcgencmd pmic_read_adc 0V8_SW_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_VDD_CORE_A",
+      "dev": "vcgencmd pmic_read_adc VDD_CORE_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_DAC_A",
+      "dev": "vcgencmd pmic_read_adc 3V3_DAC_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_ADC_A",
+      "dev": "vcgencmd pmic_read_adc 3V3_ADC_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_0V8_AON_A",
+      "dev": "vcgencmd pmic_read_adc 0V8_AON_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_HDMI_A",
+      "dev": "vcgencmd pmic_read_adc HDMI_A 2>/dev/null | awk -F'=' '{print $2}' | sed 's/A//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+
+    {
+      "name": "pmic_3V7_WL_SW_V",
+      "dev": "vcgencmd pmic_read_adc 3V7_WL_SW_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_SYS_V",
+      "dev": "vcgencmd pmic_read_adc 3V3_SYS_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_1V8_SYS_V",
+      "dev": "vcgencmd pmic_read_adc 1V8_SYS_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_DDR_VDD2_V",
+      "dev": "vcgencmd pmic_read_adc DDR_VDD2_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_DDR_VDDQ_V",
+      "dev": "vcgencmd pmic_read_adc DDR_VDDQ_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_1V1_SYS_V",
+      "dev": "vcgencmd pmic_read_adc 1V1_SYS_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_0V8_SW_V",
+      "dev": "vcgencmd pmic_read_adc 0V8_SW_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_VDD_CORE_V",
+      "dev": "vcgencmd pmic_read_adc VDD_CORE_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_DAC_V",
+      "dev": "vcgencmd pmic_read_adc 3V3_DAC_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_3V3_ADC_V",
+      "dev": "vcgencmd pmic_read_adc 3V3_ADC_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_0V8_AON_V",
+      "dev": "vcgencmd pmic_read_adc 0V8_AON_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_HDMI_V",
+      "dev": "vcgencmd pmic_read_adc HDMI_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_EXT5V_V",
+      "dev": "vcgencmd pmic_read_adc EXT5V_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "pmic_BATT_V",
+      "dev": "vcgencmd pmic_read_adc BATT_V 2>/dev/null | awk -F'=' '{print $2}' | sed 's/V//g'",
+      "kind": "executable",
+      "value_type": "float"
+    }
+  ]
+}

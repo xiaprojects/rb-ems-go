@@ -10,6 +10,8 @@
       "gain_mv": 512,
       "dr_sps": 128,
       "r0": 1.0,
+      "value_type": "float",
+      "average_level": 0,
       "r0Offset": 0.0
     },
     {
@@ -21,6 +23,8 @@
       "gain_mv": 512,
       "dr_sps": 128,
       "r0": -340,
+      "value_type": "int",
+      "average_level": 50,
       "r0Offset": 182
     }
   ]

@@ -23,6 +23,7 @@ This source is part of the project RB:
 05 -> Display with Stratux BLE Traffic
 06 -> Display with Android 6.25" 7" 8" 10" 10.2"
 07 -> Display with Stratux BLE Traffic composed by RB-05 + RB-03 in the same box
+08 -> Voice Recognition Box with LLM and Natural speaking and Voice Recorder
 
 Community edition will be free for all builders and personal use as defined by the licensing model
 Dual licensing for commercial agreement is available
@@ -212,15 +213,17 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 
 func ems_adc_sample_i2c(configFilename string) {
 	type sensor struct {
-		Name    string  `json:"name"`
-		Kind    string  `json:"kind"`
-		Dev     string  `json:"dev"`
-		Addr    string  `json:"addr"`
-		Channel int     `json:"channel"`
-		R0      float64 `json:"r0"`
-		GainmV  int     `json:"gain_mv"`
-		DRSPS   int     `json:"dr_sps"`
-		R0Offset float64 `json:"r0Offset"`
+		Name         string  `json:"name"`
+		Kind         string  `json:"kind"`
+		Dev          string  `json:"dev"`
+		Addr         string  `json:"addr"`
+		Channel      int     `json:"channel"`
+		R0           float64 `json:"r0"`
+		GainmV       int     `json:"gain_mv"`
+		DRSPS        int     `json:"dr_sps"`
+		R0Offset     float64 `json:"r0Offset"`
+		ValueType    string  `json:"value_type"`    // "float" or "int"
+		AverageLevel int     `json:"average_level"` // 0 = no average, N = multiplier: (existing*N + val)/(N+1)
 	}
 	type config struct {
 		Url     string   `json:"url"`
@@ -285,6 +288,7 @@ func ems_adc_sample_i2c(configFilename string) {
 		return byte(v), nil
 	}
 
+	var prevPayload map[string]float32
 	for {
 		payload := make(map[string]float32)
 
@@ -333,12 +337,43 @@ func ems_adc_sample_i2c(configFilename string) {
 				continue
 			}
 
-			out := v * s.R0 + s.R0Offset
+			out := v*s.R0 + s.R0Offset
 			log.Printf("%s: Vin=%.6fV value=%.6f", s.Name, v, out)
-			payload[s.Name] = float32(out)
+			val := float32(out)
+
+			avgLevel := s.AverageLevel
+			if avgLevel == 0 {
+				payload[s.Name] = val
+			} else {
+				if existing, exists := payload[s.Name]; exists {
+					payload[s.Name] = (existing*float32(avgLevel) + val) / float32(avgLevel+1)
+				} else {
+					payload[s.Name] = val
+				}
+			}
+			if s.ValueType == "int" || s.ValueType == "integer" {
+				payload[s.Name] = float32(int(payload[s.Name]))
+			}
 		}
 
-		_ = RBEMSPostData(configuration.Url, payload)
+		// Only post if payload has changed
+		payloadChanged := len(payload) != len(prevPayload)
+		if !payloadChanged {
+			for k, v := range payload {
+				if pv, ok := prevPayload[k]; !ok || pv != v {
+					payloadChanged = true
+					break
+				}
+			}
+		}
+
+		if payloadChanged {
+			_ = RBEMSPostData(configuration.Url, payload)
+			prevPayload = make(map[string]float32)
+			for k, v := range payload {
+				prevPayload[k] = v
+			}
+		}
 		time.Sleep(1 * time.Second)
 	}
 }

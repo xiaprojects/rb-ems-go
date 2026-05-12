@@ -179,8 +179,10 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 		return 0, err
 	}
 
+	time.Sleep(convTime + 10*time.Millisecond)
+
 	// Poll OS ready
-	deadline := time.Now().Add(2*convTime + 10*time.Millisecond)
+	deadline := time.Now().Add(2*convTime + 50*time.Millisecond)
 	for {
 		u, _, err := readReg16(regConfig)
 		if err != nil {
@@ -194,7 +196,7 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 		if time.Now().After(deadline) {
 			return 0, fmt.Errorf("ADS1115 conversion not ready (timeout), last cfg=0x%04X", u)
 		}
-		time.Sleep(1 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	// Read conversion
@@ -294,24 +296,24 @@ func ems_adc_sample_i2c(configFilename string) {
 
 		for _, s := range configuration.Sensors {
 			if s.Kind != "ADS1115" {
-				//log.Printf("%s error: chip not supported: %s", s.Name, s.Kind)
+				log.Printf("%s error: chip not supported: %s", s.Name, s.Kind)
 				continue
 			}
 
 			busIdx, err := parseBusIndex(s.Dev)
 			if err != nil {
-				//log.Printf("%s error: invalid i2c bus: %s", s.Name, s.Dev)
+				log.Printf("%s error: invalid i2c bus: %s", s.Name, s.Dev)
 				continue
 			}
 			addr, err := parseAddr(s.Addr)
 			if err != nil {
-				//log.Printf("%s error: invalid addr: %s", s.Name, s.Addr)
+				log.Printf("%s error: invalid addr: %s", s.Name, s.Addr)
 				continue
 			}
 
 			bus, err := getBus(busIdx)
 			if err != nil {
-				//log.Printf("%s error: open i2c bus %d: %v", s.Name, busIdx, err)
+				log.Printf("%s error: open i2c bus %d: %v", s.Name, busIdx, err)
 				continue
 			}
 
@@ -333,7 +335,7 @@ func ems_adc_sample_i2c(configFilename string) {
 				Clamp0:  true,
 			})
 			if err != nil {
-				//log.Printf("%s error: %v", s.Name, err)
+				log.Printf("%s error: %v", s.Name, err)
 				continue
 			}
 
@@ -354,6 +356,8 @@ func ems_adc_sample_i2c(configFilename string) {
 			if s.ValueType == "int" || s.ValueType == "integer" {
 				payload[s.Name] = float32(int(payload[s.Name]))
 			}
+
+			time.Sleep(50 * time.Millisecond)
 		}
 
 		// Only post if payload has changed

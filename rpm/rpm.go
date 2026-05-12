@@ -41,7 +41,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -50,20 +49,31 @@ import (
 	"github.com/warthog618/go-gpiocdev"
 )
 
-const (
-	ChipPath = "/dev/gpiochip0"
-	APIURL   = "http://127.0.0.1/setEMS"
+var (
+	ChipPath   = "/dev/gpiochip0"
+	APIURL     = "http://127.0.0.1/setEMS"
+	payloadKey = "enginerpm"
 )
 
-type rpmPayload struct {
-	RPM int `json:"enginerpm"`
-}
+type rpmPayload map[string]int
 
 type rpmSample struct {
 	RPM    int
 	RawRPM float64
 	Pulses uint64
 	At     time.Time
+}
+
+type configFile struct {
+	URL     string   `json:"url"`
+	Sensors []sensor `json:"sensors"`
+}
+
+type sensor struct {
+	Name string `json:"name"`
+	Dev  string `json:"dev"`
+	Kind string `json:"kind"`
+	GPIO int    `json:"gpio"`
 }
 
 func main() {
@@ -80,16 +90,45 @@ func main() {
 	flag.Parse()
 
 	if flag.NArg() < 1 {
-		log.Fatal("Missing GPIO Number (offset)")
+		log.Fatal("Missing JSON configuration file path")
 	}
 
-	offset, err := strconv.Atoi(flag.Arg(0))
+	cfgPath := flag.Arg(0)
+	data, err := os.ReadFile(cfgPath)
 	if err != nil {
-		log.Fatal("GPIO shall be a number")
+		log.Fatalf("cannot read config file %q: %v", cfgPath, err)
 	}
-	if offset > 50 || offset == 0 {
+
+	var fileCfg configFile
+	if err := json.Unmarshal(data, &fileCfg); err != nil {
+		log.Fatalf("invalid config file %q: %v", cfgPath, err)
+	}
+
+	var sensorCfg *sensor
+	for i := range fileCfg.Sensors {
+		if fileCfg.Sensors[i].Kind == "gpiopulse" {
+			sensorCfg = &fileCfg.Sensors[i]
+			break
+		}
+	}
+	if sensorCfg == nil {
+		log.Fatal("no gpiopulse sensor found in config")
+	}
+	if sensorCfg.GPIO <= 0 || sensorCfg.GPIO > 50 {
 		log.Fatal("GPIO shall be a number between 1-49")
 	}
+
+	if sensorCfg.Dev != "" {
+		ChipPath = sensorCfg.Dev
+	}
+	if fileCfg.URL != "" {
+		APIURL = fileCfg.URL
+	}
+	if sensorCfg.Name != "" {
+		payloadKey = sensorCfg.Name
+	}
+
+	offset := sensorCfg.GPIO
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -246,19 +285,18 @@ func rpmSendLoop(ctx context.Context, cfg config, in <-chan rpmSample) {
 			}
 
 			fmt.Printf("RPM: %d (raw=%.1f pulses=%d)\n", s.RPM, s.RawRPM, s.Pulses)
-			if err := postRPM(client, s.RPM); err != nil {
+			if err := postRPM(client, payloadKey, s.RPM); err != nil {
 				fmt.Println("POST error:", err)
 				continue
 			}
-
 			lastSent = s.RPM
 			lastSentAt = time.Now()
 		}
 	}
 }
 
-func postRPM(client *http.Client, rpm int) error {
-	body, err := json.Marshal(rpmPayload{RPM: rpm})
+func postRPM(client *http.Client, field string, rpm int) error {
+	body, err := json.Marshal(rpmPayload{field: rpm})
 	if err != nil {
 		return err
 	}

@@ -33,6 +33,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -41,14 +42,16 @@ import (
 	"github.com/warthog618/go-gpiocdev"
 )
 
-func RBEMSPostData(url string, payload map[string]float32) int {
+func RBEMSPostData(url string, payload map[string]int) int {
 	data, err := json.Marshal(payload)
 	if err != nil {
+		fmt.Println("Error marshaling JSON:", err)
 		return 1
 	}
 
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
 	if err != nil {
+		fmt.Println("Error posting data:", err)
 		return 2
 	}
 	defer resp.Body.Close()
@@ -95,27 +98,29 @@ func ems_gpio(configFilename string) {
 
 	// Main loop
 	for {
-		// Sleep for 100 ms
-		time.Sleep(100 * time.Millisecond)
-
 		// Create payload for this cycle
-		payload := make(map[string]float32)
+		payload := make(map[string]int)
 		changed := false
 
 		// Cycle through sensors array
 		for _, sensor := range configuration.Sensors {
+			// Sleep for 100 ms
+			time.Sleep(100 * time.Millisecond)
+
 			key := sensor.Name
 			offset := sensor.Channel
 
 			// Open GPIO line using channel as offset
 			line, err := chip.RequestLine(offset)
 			if err != nil {
+				fmt.Printf("Error requesting GPIO line %d: %v\n", offset, err)
 				continue
 			}
 
 			// Read the GPIO value (0 or 1)
 			value, err := line.Value()
 			if err != nil {
+				fmt.Printf("Error reading GPIO value from line %d: %v\n", offset, err)
 				line.Close()
 				continue
 			}
@@ -129,7 +134,8 @@ func ems_gpio(configFilename string) {
 				previousReadings[key] = value
 
 				// Convert reading to float32 for payload
-				payload[key] = float32(value)
+				payload[key] = int(value)
+				fmt.Printf("%s(%d):%d\n", key, offset, payload[key])
 			}
 		}
 
@@ -137,6 +143,8 @@ func ems_gpio(configFilename string) {
 		if changed && len(payload) > 0 {
 			RBEMSPostData(configuration.Url, payload)
 		}
+
+		time.Sleep(1 * time.Second)
 	}
 
 }

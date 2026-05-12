@@ -133,7 +133,7 @@ func decodeMAX31855(raw uint32) (float64, float64, string) {
 	status := "OK"
 	if fault {
 		status = "FAULT"
-		thermoC = -100
+		thermoC = -500
 		if scv {
 			status += " (Short to VCC)"
 		}
@@ -153,15 +153,25 @@ func readMAX31855(b *SpiBus, manual bool, cs gpio.PinOut) (float64, error) {
 		return b.conn.Tx(nil, buf[:])
 	})
 	if err != nil {
-		return 0, err
+		return -500, err
 	}
 
 	raw := binary.BigEndian.Uint32(buf[:])
+	// Check for disconnected/not-connected chip: raw == 0 or all 0xFF (no response)
 	if raw == 0 {
-		return -100, nil
+		err = fmt.Errorf("MAX31855 error: chip not responding (raw: 0x00000000)")
+		return -500, err
 	}
-	tc, _, _ := decodeMAX31855(raw)
-	return tc, nil
+	if raw == 0xFFFFFFFF {
+		err = fmt.Errorf("MAX31855 error: no response detected (raw: 0xFFFFFFFF)")
+		return -500, err
+	}
+	tc, _, status := decodeMAX31855(raw)
+	// Log fault status for debugging
+	if status != "OK" {
+		err = fmt.Errorf("MAX31855 fault: %s (raw: 0x%08X)", status, raw)
+	}
+	return tc, err
 }
 
 /*************** MAX31856 ****************/
@@ -197,26 +207,36 @@ func max31856WriteReg(b *SpiBus, manual bool, cs gpio.PinOut, reg byte, data ...
 func readMAX31856(b *SpiBus, manual bool, cs gpio.PinOut, thermocoupleType byte) (float64, error) {
 	// Enable continuous conversion (CR0 bit7) [web:10]
 	if err := max31856WriteReg(b, manual, cs, max31856CR0, 0x80); err != nil {
-		return -100, err
+		return -500, err
 	}
 
 	// Set thermocouple type in CR1 (low nibble)
 	cr1, err := max31856ReadReg(b, manual, cs, max31856CR1, 1)
 	if err != nil {
-		return -100, err
+		return -500, err
 	}
 	newCR1 := (cr1[0] &^ 0x0F) | (thermocoupleType & 0x0F)
 	if err := max31856WriteReg(b, manual, cs, max31856CR1, newCR1); err != nil {
-		return -100, err
+		return -500, err
 	}
 
 	time.Sleep(200 * time.Millisecond)
 
 	d, err := max31856ReadReg(b, manual, cs, max31856TCMSB, 3)
 	if err != nil {
-		return -100, err
+		return -500, err
 	}
 	raw := int32(d[0])<<16 | int32(d[1])<<8 | int32(d[2])
+
+	// Check for disconnected/not-connected chip: all 1s (0x7FFFFF after shift) or all 0s
+	if raw == 0 {
+		err = fmt.Errorf("MAX31856 error: chip not responding (raw: 0x000000)")
+		return -500, err
+	}
+	if raw == 0x7FFFFF {
+		err = fmt.Errorf("MAX31856 error: no response detected (raw: 0x7FFFFF)")
+		return -500, err
+	}
 
 	// 19-bit signed in [23:5], LSB=2^-7=0.0078125°C [web:10]
 	code19 := raw >> 5
@@ -295,17 +315,18 @@ func ems_egt_cht_sample_spi(configFilename string) {
 	}
 
 	type sensor struct {
-		Name    string  `json:"name"`
-		Dev     string  `json:"dev"`
-		Kind    string  `json:"kind"`
-		Gpio    int     `json:"gpio"`    // >0 => CS manuale su GPIO{n}, 0 => CS kernel [web:136]
-		SpiMode int     `json:"spiMode"` // spi.Mode(0..3)
-		R0      float64 `json:"r0"`
+		Name     string  `json:"name"`
+		Dev      string  `json:"dev"`
+		Kind     string  `json:"kind"`
+		Gpio     int     `json:"gpio"`    // >0 => CS manuale su GPIO{n}, 0 => CS kernel [web:136]
+		SpiMode  int     `json:"spiMode"` // spi.Mode(0..3)
+		R0       float64 `json:"r0"`
 		R0Offset float64 `json:"r0Offset"`
 	}
 
 	type config struct {
 		Url     string   `json:"url"`
+		Speed   int      `json:"busSpeed"` // Hz, 0 = default 1MHz
 		Sensors []sensor `json:"sensors"`
 	}
 
@@ -325,9 +346,13 @@ func ems_egt_cht_sample_spi(configFilename string) {
 	// cache bus per /dev/spidevX.Y
 	buses := map[string]*SpiBus{}
 
-	getBus := func(dev string, mode spi.Mode) (*SpiBus, error) {
+	getBus := func(dev string, mode spi.Mode, speed int) (*SpiBus, error) {
 		if b, ok := buses[dev]; ok {
 			return b, nil
+		}
+
+		if speed <= 0 {
+			speed = 1 * int(physic.MegaHertz)
 		}
 
 		p, err := spireg.Open(dev) // spidev node: CS kernel associato al dev [web:136]
@@ -335,7 +360,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 			return nil, err
 		}
 
-		c, err := p.Connect(1*physic.MegaHertz, mode, 8)
+		c, err := p.Connect(physic.Frequency(speed), mode, 8)
 		if err != nil {
 			_ = p.Close()
 			return nil, err
@@ -353,7 +378,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 		payload := make(map[string]float32)
 
 		for _, s := range sensors {
-			b, err := getBus(s.Dev, spi.Mode(s.SpiMode))
+			b, err := getBus(s.Dev, spi.Mode(s.SpiMode), configuration.Speed)
 			if err != nil {
 				log.Printf("[%s] open/connect error: %v\n", s.Name, err)
 				continue
@@ -367,8 +392,13 @@ func ems_egt_cht_sample_spi(configFilename string) {
 					log.Printf("[%s] GPIO%d non trovato\n", s.Name, s.Gpio)
 					continue
 				}
-				_ = cs.Out(gpio.High) // deselect
+				err = cs.Out(gpio.High) // deselect
+				if err != nil {
+					log.Printf("%s error gpio.High: %v\n", s.Name, err)
+				}
 			}
+
+			time.Sleep(100 * time.Millisecond)
 
 			var temp float64
 
@@ -390,6 +420,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 
 			default:
 				err = fmt.Errorf("kind non supportato: %s", s.Kind)
+				log.Printf("[%s] unsupported sensor type: %s", s.Name, s.Kind)
 			}
 
 			if err != nil {
@@ -397,9 +428,9 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				continue
 			}
 
-			temp = temp * s.R0 + s.R0Offset
+			temp = temp*s.R0 + s.R0Offset
 
-			if temp >= -10 {
+			if temp > -500 {
 				log.Printf("%s: %.2f °C\n", s.Name, temp)
 				payload[s.Name] = float32(temp)
 			}

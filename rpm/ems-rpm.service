@@ -3,12 +3,13 @@ Description=EMS
 After=network.target bluetooth.target
 
 [Service]
-ExecStart=/opt/stratux/bin/ems-rpm 4
+ExecStart=/opt/stratux/bin/ems-rpm   /opt/stratux/www/settings/ems-rpm.json
 User=pi
 KillMode=process
 Restart=always
 RestartSec=5
-StandardOutput=null
+StandardOutput=syslog
+StandardError=syslog
 
 [Install]
 WantedBy=multi-user.target

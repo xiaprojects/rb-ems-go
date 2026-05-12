@@ -2,30 +2,74 @@
   "url": "http://localhost/setEMS",
   "sensors": [
 {
-      "name": "voltage",
+      "name": "oilprobe",
       "kind": "ADS1115",
-      "dev": "1",
+      "dev": "0",
       "addr": "0x48",
       "channel": 0,
       "gain_mv": 512,
-      "dr_sps": 128,
-      "r0": 1.0,
+      "dr_sps": 8,
+      "r0": 1,
       "value_type": "float",
       "average_level": 0,
-      "r0Offset": 0.0
+      "r0Offset": 0.0,
+      "probe":null
     },
     {
       "name": "oiltemperature",
       "kind": "ADS1115",
-      "dev": "1",
+      "dev": "0",
       "addr": "0x48",
       "channel": 0,
       "gain_mv": 512,
-      "dr_sps": 128,
-      "r0": -340,
-      "value_type": "int",
+      "dr_sps": 8,
+      "r0": -500,
+      "value_type": "float",
       "average_level": 50,
-      "r0Offset": 182
+      "r0Offset": 130,
+      "probe":null
+    },
+    {
+      "name": "rail50",
+      "kind": "ADS1115",
+      "dev": "0",
+      "addr": "0x48",
+      "channel": 1,
+      "value_type":"float",
+      "average_level":0,
+      "gain_mv": 6144,
+      "dr_sps": 8,
+      "r0": 1,
+      "r0Offset": 0,
+      "probe":null
+    },
+    {
+      "name": "BatteryVoltage",
+      "kind": "ADS1115",
+      "dev": "0",
+      "addr": "0x48",
+      "channel": 2,
+      "value_type":"float",
+      "average_level":0,
+      "gain_mv": 6144,
+      "dr_sps": 8,
+      "r0": 1,
+      "r0Offset": 0,
+      "probe":null
+    },
+    {
+      "name": "Oilpressure",
+      "kind": "ADS1115",
+      "dev": "0",
+      "addr": "0x48",
+      "channel": 3,
+      "value_type":"float",
+      "average_level":0,
+      "gain_mv": 6144,
+      "dr_sps": 8,
+      "r0": 1,
+      "r0Offset": 0,
+      "probe":null
     }
   ]
 }

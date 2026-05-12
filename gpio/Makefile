@@ -13,7 +13,7 @@ install: ems-gpio
 	# binaries
 	cp -f ems-gpio $(STRATUX_HOME)/bin/
 	chmod 755 $(STRATUX_HOME)/bin/ems-gpio
-	cp -f ems-gpio.json $(STRATUX_HOME)/www/settings
+	test -f $(STRATUX_HOME)/www/settings/ems-gpio.json || cp -f ems-gpio.json $(STRATUX_HOME)/www/settings
 	cp ems-gpio.service /lib/systemd/system
 	systemctl daemon-reload
 	systemctl enable ems-gpio.service

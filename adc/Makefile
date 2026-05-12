@@ -13,7 +13,7 @@ install: ems-adc
 	# binaries
 	cp -f ems-adc $(STRATUX_HOME)/bin/
 	chmod 755 $(STRATUX_HOME)/bin/ems-adc
-	cp -f ems-adc.json $(STRATUX_HOME)/www/settings
+	test -f $(STRATUX_HOME)/www/settings/ems-adc.json || cp -f ems-adc.json $(STRATUX_HOME)/www/settings
 	cp ems-adc.service /lib/systemd/system
 	systemctl daemon-reload
 	systemctl enable ems-adc.service

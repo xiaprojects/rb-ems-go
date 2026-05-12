@@ -13,7 +13,7 @@ install: ems-rpm
 	# binaries
 	cp -f ems-rpm $(STRATUX_HOME)/bin/
 	chmod 755 $(STRATUX_HOME)/bin/ems-rpm
-	cp -f ems-rpm.json $(STRATUX_HOME)/www/settings
+	test -f $(STRATUX_HOME)/www/settings/ems-rpm.json || cp -f ems-rpm.json $(STRATUX_HOME)/www/settings
 	cp ems-rpm.service /lib/systemd/system
 	systemctl daemon-reload
 	systemctl enable ems-rpm.service

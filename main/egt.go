@@ -430,7 +430,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 
 			temp = temp*s.R0 + s.R0Offset
 
-			if temp > -500 {
+			if err == nil {
 				log.Printf("%s: %.2f °C\n", s.Name, temp)
 				payload[s.Name] = float32(temp)
 			}

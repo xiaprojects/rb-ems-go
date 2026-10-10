@@ -109,7 +109,7 @@ func main() {
 		if err != nil {
 			fmt.Printf("Error in execution loop: %v\n", err)
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(time.Duration(*waitTime) * time.Second)
 	}
 }
 

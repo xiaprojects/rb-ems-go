@@ -2,10 +2,10 @@
     "url": "http://localhost/setEMS",
     "sensors": [
         {
-            "name": "RPM",
+            "name": "enginerpm",
             "dev": "/dev/gpiochip0",
             "kind": "gpiopulse",
-            "gpio": 4
+            "gpio": 22
         }
     ]
 }

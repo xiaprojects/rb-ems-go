@@ -291,6 +291,8 @@ func ems_adc_sample_i2c(configFilename string) {
 	}
 
 	var prevPayload map[string]float32
+	// Low pass filter state per sensor name, kept across cycles and before int truncation
+	filtered := make(map[string]float32)
 	for {
 		payload := make(map[string]float32)
 
@@ -344,17 +346,15 @@ func ems_adc_sample_i2c(configFilename string) {
 			val := float32(out)
 
 			avgLevel := s.AverageLevel
-			if avgLevel == 0 {
-				payload[s.Name] = val
-			} else {
-				if existing, exists := payload[s.Name]; exists {
-					payload[s.Name] = (existing*float32(avgLevel) + val) / float32(avgLevel+1)
-				} else {
-					payload[s.Name] = val
+			if avgLevel > 0 {
+				if existing, exists := filtered[s.Name]; exists {
+					val = (existing*float32(avgLevel) + val) / float32(avgLevel+1)
 				}
+				filtered[s.Name] = val
 			}
+			payload[s.Name] = val
 			if s.ValueType == "int" || s.ValueType == "integer" {
-				payload[s.Name] = float32(int(payload[s.Name]))
+				payload[s.Name] = float32(int(val))
 			}
 
 			time.Sleep(50 * time.Millisecond)

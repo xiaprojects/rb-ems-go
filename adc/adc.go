@@ -63,12 +63,13 @@ func RBEMSPostData(url string, payload map[string]float32) int {
 }
 
 type ADS1115Opts struct {
-	Addr    byte
-	Channel int // 0..3
-	Bus     int // i2c-0, i2c-1, ...
-	GainFSR int // 6144,4096,2048,1024,512,256 (mV full-scale)
-	DRSPS   int // 8,16,32,64,128,250,475,860
-	Clamp0  bool
+	Addr       byte
+	Channel    int  // 0..3
+	ChannelNeg *int // nil = single-ended vs GND, else AIN negative input (differential)
+	Bus        int  // i2c-0, i2c-1, ...
+	GainFSR    int  // 6144,4096,2048,1024,512,256 (mV full-scale)
+	DRSPS      int  // 8,16,32,64,128,250,475,860
+	Clamp0     bool
 }
 
 func ads1115Gain(gainFSRmV int) (uint16, float64, error) {
@@ -128,6 +129,21 @@ func ads1115MuxSingleEnded(channel int) (uint16, error) {
 	}
 }
 
+func ads1115MuxDifferential(pos, neg int) (uint16, error) {
+	switch {
+	case pos == 0 && neg == 1:
+		return 0x0000, nil // AIN0 vs AIN1
+	case pos == 0 && neg == 3:
+		return 0x1000, nil // AIN0 vs AIN3
+	case pos == 1 && neg == 3:
+		return 0x2000, nil // AIN1 vs AIN3
+	case pos == 2 && neg == 3:
+		return 0x3000, nil // AIN2 vs AIN3
+	default:
+		return 0, fmt.Errorf("unsupported differential pair %d-%d (ADS1115 supports 0-1, 0-3, 1-3, 2-3)", pos, neg)
+	}
+}
+
 func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 	const (
 		regConv   = 0x00
@@ -159,7 +175,13 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 		return nil
 	}
 
-	mux, err := ads1115MuxSingleEnded(opt.Channel)
+	var mux uint16
+	var err error
+	if opt.ChannelNeg != nil {
+		mux, err = ads1115MuxDifferential(opt.Channel, *opt.ChannelNeg)
+	} else {
+		mux, err = ads1115MuxSingleEnded(opt.Channel)
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -220,6 +242,7 @@ func ems_adc_sample_i2c(configFilename string) {
 		Dev          string  `json:"dev"`
 		Addr         string  `json:"addr"`
 		Channel      int     `json:"channel"`
+		ChannelNeg   *int    `json:"channel_neg"` // nil = single-ended vs GND, else differential channel-channel_neg (signed, not clamped)
 		R0           float64 `json:"r0"`
 		GainmV       int     `json:"gain_mv"`
 		DRSPS        int     `json:"dr_sps"`
@@ -329,12 +352,13 @@ func ems_adc_sample_i2c(configFilename string) {
 			}
 
 			v, err := readADS1115(bus, ADS1115Opts{
-				Addr:    addr,
-				Channel: s.Channel,
-				Bus:     busIdx,
-				GainFSR: gain,
-				DRSPS:   dr,
-				Clamp0:  true,
+				Addr:       addr,
+				Channel:    s.Channel,
+				ChannelNeg: s.ChannelNeg,
+				Bus:        busIdx,
+				GainFSR:    gain,
+				DRSPS:      dr,
+				Clamp0:     s.ChannelNeg == nil,
 			})
 			if err != nil {
 				log.Printf("%s error: %v", s.Name, err)

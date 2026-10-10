@@ -44,7 +44,22 @@
       "probe":null
     },
     {
-      "name": "BatteryVoltage",
+      "name": "rail120",
+      "kind": "ADS1115",
+      "dev": "0",
+      "addr": "0x48",
+      "channel": 2,
+      "channel_neg": 3,
+      "value_type":"float",
+      "average_level":0,
+      "gain_mv": 6144,
+      "dr_sps": 8,
+      "r0": 1,
+      "r0Offset": 0,
+      "probe":null
+    },
+      {
+      "name": "rail0",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -58,17 +73,32 @@
       "probe":null
     },
     {
-      "name": "Oilpressure",
+      "name": "batteryvoltage",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
-      "channel": 3,
+      "channel": 2,
+      "channel_neg": 3,
       "value_type":"float",
       "average_level":0,
       "gain_mv": 6144,
       "dr_sps": 8,
-      "r0": 1,
+      "r0": 3.34,
       "r0Offset": 0,
+      "probe":null
+    },
+    {
+      "name": "oilpressure",
+      "kind": "ADS1115",
+      "dev": "0",
+      "addr": "0x49",
+      "channel": 0,
+      "value_type":"float",
+      "average_level":0,
+      "gain_mv": 6144,
+      "dr_sps": 8,
+      "r0": 50,
+      "r0Offset": -25,
       "probe":null
     }
   ]

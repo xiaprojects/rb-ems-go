@@ -1,7 +1,73 @@
 {
   "url": "http://localhost/setEMS",
   "sensors": [
-        {
+    {
+      "name": "undervoltage_now",
+      "dev": "echo $(( $(vcgencmd get_throttled | cut -d= -f2) & 0x1 ))",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "undervoltage_occurred",
+      "dev": "echo $(( ($(vcgencmd get_throttled | cut -d= -f2) >> 16) & 0x1 ))",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "undervoltage_events",
+      "dev": "set -o pipefail; journalctl -k -b 0 -q --no-pager | { grep -c 'Undervoltage detected' || true; }",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "psi_cpu_some_avg10",
+      "dev": "awk '/^some/{split($2,a,\"=\");print a[2]}' /proc/pressure/cpu",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "psi_io_full_avg10",
+      "dev": "awk '/^full/{split($2,a,\"=\");print a[2]}' /proc/pressure/io",
+      "kind": "executable",
+      "value_type": "float"
+    },
+    {
+      "name": "psi_io_full_total",
+      "dev": "awk '/^full/{split($5,a,\"=\");print a[2]}' /proc/pressure/io",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "psi_cpu_some_total",
+      "dev": "awk '/^some/{split($5,a,\"=\");print a[2]}' /proc/pressure/cpu",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "mem_dirty_kb",
+      "dev": "awk '/^Dirty:/{print $2}' /proc/meminfo",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "mem_writeback_kb",
+      "dev": "awk '/^Writeback:/{print $2}' /proc/meminfo",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "sda_inflight",
+      "dev": "awk '{print $9}' /sys/block/sda/stat",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
+      "name": "sda_busy_ms_total",
+      "dev": "awk '{print $10}' /sys/block/sda/stat",
+      "kind": "executable",
+      "value_type": "int"
+    },
+    {
       "name": "wlan0_connected",
       "dev": "ip link show wlan0 | grep 'state UP' && echo 1 || echo 0",
       "kind": "executable",
@@ -93,7 +159,7 @@
     },
     {
       "name": "throttled_status",
-      "dev": "vcgencmd get_throttled | cut -d= -f2 |cut -dx -f2 || echo 0",
+      "dev": "echo $(( $(vcgencmd get_throttled | cut -d= -f2) | 0 ))",
       "kind": "executable",
       "value_type": "int"
     },

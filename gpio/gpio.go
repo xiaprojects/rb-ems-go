@@ -61,13 +61,16 @@ func RBEMSPostData(url string, payload map[string]int) int {
 func ems_gpio(configFilename string) {
 	type sensor struct {
 		Name    string `json:"name"`
+		Title   string `json:"title"` // shown in the RB-01 probe failure alert, empty = name
 		Kind    string `json:"kind"`
 		Dev     string `json:"dev"`
 		Channel int    `json:"channel"`
 	}
 	type config struct {
-		Url     string   `json:"url"`
-		Sensors []sensor `json:"sensors"`
+		Url                string   `json:"url"`
+		AlertUrl           string   `json:"alertUrl"`           // RB-01 POST /alert, empty = url with path /alert
+		AlertAfterFailures int      `json:"alertAfterFailures"` // failed reads in a row before the alert, 0 = no alerts
+		Sensors            []sensor `json:"sensors"`
 	}
 
 	f, err := os.Open(configFilename)
@@ -85,6 +88,8 @@ func ems_gpio(configFilename string) {
 	if err := json.Unmarshal(rawCfg, &configuration); err != nil {
 		panic(err)
 	}
+
+	alerts := NewRBAlertTracker(configuration.AlertUrl, configuration.Url, configuration.AlertAfterFailures)
 
 	// Initialize buffer to store previous sensor readings for change detection
 	previousReadings := make(map[string]int)
@@ -114,6 +119,7 @@ func ems_gpio(configFilename string) {
 			line, err := chip.RequestLine(offset)
 			if err != nil {
 				fmt.Printf("Error requesting GPIO line %d: %v\n", offset, err)
+				alerts.Failure(sensor.Name, sensor.Title)
 				continue
 			}
 
@@ -122,11 +128,13 @@ func ems_gpio(configFilename string) {
 			if err != nil {
 				fmt.Printf("Error reading GPIO value from line %d: %v\n", offset, err)
 				line.Close()
+				alerts.Failure(sensor.Name, sensor.Title)
 				continue
 			}
 
 			// Close the line
 			line.Close()
+			alerts.Success(sensor.Name)
 
 			// Check if value changed
 			if previousValue, exists := previousReadings[key]; !exists || previousValue != value {

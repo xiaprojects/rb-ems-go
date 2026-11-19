@@ -1,9 +1,12 @@
 {
     "url": "http://localhost/setEMS",
+    "alertUrl": "http://localhost/alert",
+    "alertAfterFailures": 5,
     "busSpeed":5000000000000,
     "sensors": [
         {
             "name": "outsidetemperature",
+            "title": "OAT",
             "dev": "/dev/spidev1.0",
             "kind": "MAX31856K",
             "gpio": 17,
@@ -13,6 +16,7 @@
         },
         {
             "name": "cht1",
+            "title": "CHT 1",
             "dev": "/dev/spidev1.0",
             "kind": "MAX31856K",
             "gpio": 13,
@@ -22,6 +26,7 @@
         },
         {
             "name": "cht2",
+            "title": "CHT 2",
             "dev": "/dev/spidev1.0",
             "kind": "MAX31856K",
             "gpio": 26,
@@ -31,6 +36,7 @@
         },
         {
             "name": "cht3",
+            "title": "CHT 3",
             "dev": "/dev/spidev1.0",
             "kind": "MAX31856K",
             "gpio": 6,
@@ -40,6 +46,7 @@
         },
         {
             "name": "cht4",
+            "title": "CHT 4",
             "dev": "/dev/spidev1.0",
             "kind": "MAX31856K",
             "gpio": 27,
@@ -49,6 +56,7 @@
         },
         {
             "name": "egt4",
+            "title": "EGT 4",
             "dev": "/dev/spidev0.0",
             "kind": "MAX31855",
             "gpio": 7,
@@ -57,6 +65,7 @@
             "r0Offset": 0
         },        {
             "name": "egt3",
+            "title": "EGT 3",
             "dev": "/dev/spidev0.0",
             "kind": "MAX31855",
             "gpio": 24,
@@ -66,6 +75,7 @@
         },
         {
             "name": "egt2",
+            "title": "EGT 2",
             "dev": "/dev/spidev0.0",
             "kind": "MAX31855",
             "gpio": 8,
@@ -75,6 +85,7 @@
         },
         {
             "name": "egt1",
+            "title": "EGT 1",
             "dev": "/dev/spidev0.0",
             "kind": "MAX31855",
             "gpio": 23,

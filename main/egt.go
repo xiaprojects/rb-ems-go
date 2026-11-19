@@ -316,6 +316,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 
 	type sensor struct {
 		Name     string  `json:"name"`
+		Title    string  `json:"title"` // shown in the RB-01 probe failure alert, empty = name
 		Dev      string  `json:"dev"`
 		Kind     string  `json:"kind"`
 		Gpio     int     `json:"gpio"`    // >0 => CS manuale su GPIO{n}, 0 => CS kernel [web:136]
@@ -325,9 +326,11 @@ func ems_egt_cht_sample_spi(configFilename string) {
 	}
 
 	type config struct {
-		Url     string   `json:"url"`
-		Speed   int      `json:"busSpeed"` // Hz, 0 = default 1MHz
-		Sensors []sensor `json:"sensors"`
+		Url                string   `json:"url"`
+		AlertUrl           string   `json:"alertUrl"`           // RB-01 POST /alert, empty = url with path /alert
+		AlertAfterFailures int      `json:"alertAfterFailures"` // failed reads in a row before the alert, 0 = no alerts
+		Speed              int      `json:"busSpeed"`           // Hz, 0 = default 1MHz
+		Sensors            []sensor `json:"sensors"`
 	}
 
 	file, err := os.Open(configFilename)
@@ -342,6 +345,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 		panic(err)
 	}
 	sensors := configuration.Sensors
+	alerts := NewRBAlertTracker(configuration.AlertUrl, configuration.Url, configuration.AlertAfterFailures)
 
 	// cache bus per /dev/spidevX.Y
 	buses := map[string]*SpiBus{}
@@ -381,6 +385,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 			b, err := getBus(s.Dev, spi.Mode(s.SpiMode), configuration.Speed)
 			if err != nil {
 				log.Printf("[%s] open/connect error: %v\n", s.Name, err)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 
@@ -390,6 +395,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 				cs = gpioreg.ByName(fmt.Sprintf("GPIO%d", s.Gpio))
 				if cs == nil {
 					log.Printf("[%s] GPIO%d non trovato\n", s.Name, s.Gpio)
+					alerts.Failure(s.Name, s.Title)
 					continue
 				}
 				err = cs.Out(gpio.High) // deselect
@@ -425,6 +431,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 
 			if err != nil {
 				log.Printf("%s error: %v\n", s.Name, err)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 
@@ -433,6 +440,7 @@ func ems_egt_cht_sample_spi(configFilename string) {
 			if err == nil {
 				log.Printf("%s: %.2f °C\n", s.Name, temp)
 				payload[s.Name] = float32(temp)
+				alerts.Success(s.Name)
 			}
 		}
 

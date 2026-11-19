@@ -1,20 +1,25 @@
 {
   "url": "http://localhost/setEMS",
+  "alertUrl": "http://localhost/alert",
+  "alertAfterFailures": 5,
   "sensors": [
     {
       "name": "gearnose",
+      "title": "Nose gear",
       "kind": "GPIO",
       "dev": "1",
       "channel": 25
     },
     {
       "name": "gearleft",
+      "title": "Left gear",
       "kind": "GPIO",
       "dev": "1",
       "channel": 12
     },
     {
       "name": "gearright",
+      "title": "Right gear",
       "kind": "GPIO",
       "dev": "1",
       "channel": 16

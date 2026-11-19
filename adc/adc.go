@@ -238,6 +238,7 @@ func readADS1115(bus i2c.Bus, opt ADS1115Opts) (float64, error) {
 func ems_adc_sample_i2c(configFilename string) {
 	type sensor struct {
 		Name         string  `json:"name"`
+		Title        string  `json:"title"` // shown in the RB-01 probe failure alert, empty = name
 		Kind         string  `json:"kind"`
 		Dev          string  `json:"dev"`
 		Addr         string  `json:"addr"`
@@ -251,8 +252,10 @@ func ems_adc_sample_i2c(configFilename string) {
 		AverageLevel int     `json:"average_level"` // 0 = no average, N = multiplier: (existing*N + val)/(N+1)
 	}
 	type config struct {
-		Url     string   `json:"url"`
-		Sensors []sensor `json:"sensors"`
+		Url                string   `json:"url"`
+		AlertUrl           string   `json:"alertUrl"`           // RB-01 POST /alert, empty = url with path /alert
+		AlertAfterFailures int      `json:"alertAfterFailures"` // failed reads in a row before the alert, 0 = no alerts
+		Sensors            []sensor `json:"sensors"`
 	}
 
 	f, err := os.Open(configFilename)
@@ -313,6 +316,8 @@ func ems_adc_sample_i2c(configFilename string) {
 		return byte(v), nil
 	}
 
+	alerts := NewRBAlertTracker(configuration.AlertUrl, configuration.Url, configuration.AlertAfterFailures)
+
 	var prevPayload map[string]float32
 	// Low pass filter state per sensor name, kept across cycles and before int truncation
 	filtered := make(map[string]float32)
@@ -322,23 +327,27 @@ func ems_adc_sample_i2c(configFilename string) {
 		for _, s := range configuration.Sensors {
 			if s.Kind != "ADS1115" {
 				log.Printf("%s error: chip not supported: %s", s.Name, s.Kind)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 
 			busIdx, err := parseBusIndex(s.Dev)
 			if err != nil {
 				log.Printf("%s error: invalid i2c bus: %s", s.Name, s.Dev)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 			addr, err := parseAddr(s.Addr)
 			if err != nil {
 				log.Printf("%s error: invalid addr: %s", s.Name, s.Addr)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 
 			bus, err := getBus(busIdx)
 			if err != nil {
 				log.Printf("%s error: open i2c bus %d: %v", s.Name, busIdx, err)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
 
@@ -362,8 +371,10 @@ func ems_adc_sample_i2c(configFilename string) {
 			})
 			if err != nil {
 				log.Printf("%s error: %v", s.Name, err)
+				alerts.Failure(s.Name, s.Title)
 				continue
 			}
+			alerts.Success(s.Name)
 
 			out := v*s.R0 + s.R0Offset
 			log.Printf("%s: Vin=%.6fV value=%.6f", s.Name, v, out)

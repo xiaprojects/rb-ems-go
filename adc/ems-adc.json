@@ -1,8 +1,11 @@
 {
   "url": "http://localhost/setEMS",
+  "alertUrl": "http://localhost/alert",
+  "alertAfterFailures": 5,
   "sensors": [
 {
       "name": "oilprobe",
+      "title": "Oil probe",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -17,6 +20,7 @@
     },
     {
       "name": "oiltemperature",
+      "title": "Oil temperature",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -31,6 +35,7 @@
     },
     {
       "name": "rail50",
+      "title": "Rail 5.0V",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -45,6 +50,7 @@
     },
     {
       "name": "rail120",
+      "title": "Rail 12.0V",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -60,6 +66,7 @@
     },
       {
       "name": "rail0",
+      "title": "Rail 0V",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -74,6 +81,7 @@
     },
     {
       "name": "batteryvoltage",
+      "title": "Battery voltage",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x48",
@@ -89,6 +97,7 @@
     },
     {
       "name": "oilpressure",
+      "title": "Oil pressure",
       "kind": "ADS1115",
       "dev": "0",
       "addr": "0x49",
